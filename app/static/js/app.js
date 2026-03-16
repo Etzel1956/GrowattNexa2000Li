@@ -487,6 +487,10 @@ function startAutoRefresh() {
     autoRefreshTimer = setInterval(async () => {
         if (connected) {
             await fetchLiveStatus();
+            await fetchEnergyTotals();
+            if (!lastPanelMode) {
+                await fetchDayChart();
+            }
         }
     }, 30000);
     document.getElementById('refreshIndicator').classList.add('active');
