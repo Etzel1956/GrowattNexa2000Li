@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Growatt Nexa 2000 - Solar Monitor</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+</head>
+<body>
+
+<div class="header">
+    <div>
+        <h1>Growatt Nexa 2000 - Solar Monitor</h1>
+        <div class="subtitle">Linux Web Edition</div>
+    </div>
+    <div id="connectionStatus" style="font-size:0.85rem; opacity:0.8;">Nicht verbunden</div>
+</div>
+
+<div class="container">
+<div class="layout">
+
+<!-- Left sidebar -->
+<div class="sidebar">
+
+    <!-- Login -->
+    <div class="card">
+        <h3>Verbindung</h3>
+        <div class="login-group">
+            <label for="username">Benutzername:</label>
+            <input type="text" id="username" value="{{ default_user }}">
+            <label for="password">Passwort:</label>
+            <input type="password" id="password" value="{{ default_pass }}">
+            <button id="btnConnect" class="btn btn-connect" onclick="toggleConnect()">Verbinden</button>
+        </div>
+    </div>
+
+    <!-- Actions -->
+    <div class="card" id="actionsCard" style="display:none;">
+        <h3>Aktionen</h3>
+        <button class="btn btn-action" onclick="fetchLiveStatus()">Live-Status</button>
+        <button class="btn btn-action" onclick="fetchEnergyTotals()">Energie-Gesamtdaten</button>
+        <button class="btn btn-action" onclick="fetchDayChart()">Tages-Energieverlauf</button>
+        <button class="btn btn-action" onclick="fetchPanelDetails()">Panel-Details</button>
+
+        <div class="controls-row" style="margin-top:10px;">
+            <input type="date" id="selectedDate">
+            <label><input type="checkbox" id="chkAutoRefresh" onchange="toggleAutoRefresh()"> Auto (30s)</label>
+        </div>
+        <div class="controls-row">
+            <label><input type="checkbox" id="chkShowPvModules" onchange="onPvModulesToggle()"> PV-Module</label>
+        </div>
+        <div class="refresh-indicator" id="refreshIndicator">Auto-Refresh aktiv</div>
+    </div>
+
+    <!-- Live Status -->
+    <div class="card" id="statusCard" style="display:none;">
+        <h3>Live-Status</h3>
+        <div class="status-grid">
+            <div class="status-item">
+                <span class="label">PV-Leistung</span>
+                <span class="value pv" id="valPvPower">-- W</span>
+            </div>
+            <div class="status-item">
+                <span class="label">Batterie SOC</span>
+                <span class="value soc" id="valBatSoc">-- %</span>
+            </div>
+            <div class="status-item">
+                <span class="label">Batterie Leistung</span>
+                <span class="value bat" id="valBatPower">-- W</span>
+            </div>
+            <div class="status-item">
+                <span class="label">Verbrauch</span>
+                <span class="value load" id="valLoadPower">-- W</span>
+            </div>
+            <div class="status-item">
+                <span class="label">Netz</span>
+                <span class="value grid" id="valGridPower">-- W</span>
+            </div>
+            <div class="status-item">
+                <span class="label">PV Heute</span>
+                <span class="value pv" id="valPvToday">-- kWh</span>
+            </div>
+            <div class="status-item">
+                <span class="label">PV Gesamt</span>
+                <span class="value energy" id="valPvTotal">-- kWh</span>
+            </div>
+            <div class="status-item">
+                <span class="label">Ertrag Heute</span>
+                <span class="value money" id="valChargeToday">--</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Panel Filter (shown during Panel-Details) -->
+    <div class="card panel-filter" id="panelFilterCard">
+        <h3>Panel-Filter</h3>
+        <div class="radio-group">
+            <label><input type="radio" name="panelMode" value="power" checked onchange="refreshPanelChart()"> Leistung (W)</label>
+            <label><input type="radio" name="panelMode" value="va" onchange="refreshPanelChart()"> Spannung/Strom</label>
+        </div>
+        <div class="pv-checkboxes" id="pvCheckboxes"></div>
+    </div>
+
+    <!-- Log -->
+    <div class="card">
+        <h3>Log</h3>
+        <div class="log-area" id="logArea"></div>
+    </div>
+
+</div>
+
+<!-- Right: Charts -->
+<div class="chart-area">
+    <div class="chart-card">
+        <canvas id="chartMain"></canvas>
+    </div>
+    <div class="chart-card">
+        <canvas id="chartConsumption"></canvas>
+    </div>
+</div>
+
+</div>
+</div>
+
+<script src="/static/js/app.js"></script>
+</body>
+</html>
