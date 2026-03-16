@@ -43,12 +43,12 @@
         <button class="btn btn-action" onclick="fetchDayChart()">Tages-Energieverlauf</button>
         <button class="btn btn-action" onclick="fetchPanelDetails()">Panel-Details</button>
 
-        <div class="controls-row" style="margin-top:10px;">
-            <input type="date" id="selectedDate">
-            <label><input type="checkbox" id="chkAutoRefresh" onchange="toggleAutoRefresh()"> Auto (30s)</label>
+        <div style="margin-top:10px;">
+            <input type="date" id="selectedDate" style="width:100%; padding:8px 10px; border:1px solid #dee2e6; border-radius:4px; font-size:0.9rem; margin-bottom:8px;">
         </div>
         <div class="controls-row">
-            <label><input type="checkbox" id="chkShowPvModules" onchange="onPvModulesToggle()"> PV-Module</label>
+            <label style="cursor:pointer;"><input type="checkbox" id="chkAutoRefresh" onchange="toggleAutoRefresh()" style="width:18px; height:18px; cursor:pointer;"> Auto-Refresh (30s)</label>
+            <label style="cursor:pointer;"><input type="checkbox" id="chkShowPvModules" onchange="onPvModulesToggle()" style="width:18px; height:18px; cursor:pointer;"> PV-Module</label>
         </div>
         <div class="refresh-indicator" id="refreshIndicator">Auto-Refresh aktiv</div>
     </div>
