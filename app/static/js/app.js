@@ -483,6 +483,7 @@ function toggleAutoRefresh() {
 
 function startAutoRefresh() {
     stopAutoRefresh();
+    document.getElementById('chkAutoRefresh').checked = true;
     autoRefreshTimer = setInterval(async () => {
         if (connected) {
             await fetchLiveStatus();
