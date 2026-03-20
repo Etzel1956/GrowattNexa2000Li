@@ -1,5 +1,5 @@
 // ============================================================
-// Growatt Nexa 2000 Li – Web Frontend
+// Growatt Nexa 2000 Li – Web Frontend v2.0
 // ============================================================
 
 let connected = false;
@@ -10,6 +10,7 @@ let lastPanelMode = false;  // true when Panel-Details view is active
 // Chart.js instances
 let mainChart = null;
 let consumptionChart = null;
+let historyChart = null;
 
 // ------------------------------------------------------------------
 // Helpers
@@ -53,13 +54,32 @@ function pvColor(num) {
 }
 
 // ------------------------------------------------------------------
+// Tab switching
+// ------------------------------------------------------------------
+
+function switchTab(name) {
+    document.querySelectorAll('.tab-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.tab === name);
+    });
+    document.querySelectorAll('.tab-content').forEach(sec => {
+        sec.classList.toggle('active', sec.id === 'tab-' + name);
+    });
+
+    if (name === 'history') {
+        fetchMonthlyHistory();
+    } else if (name === 'statistics') {
+        fetchStatistics();
+    }
+}
+
+// ------------------------------------------------------------------
 // Init
 // ------------------------------------------------------------------
 
 document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('selectedDate').value = todayStr();
 
-    // Init Chart.js
+    // Init Chart.js – Live charts
     mainChart = new Chart(document.getElementById('chartMain'), {
         type: 'line',
         data: { labels: [], datasets: [] },
@@ -70,6 +90,13 @@ document.addEventListener('DOMContentLoaded', () => {
         data: { labels: [], datasets: [] },
         options: chartOptions('W', false),
     });
+
+    // Init year/month selectors
+    initHistorySelectors();
+
+    // Load DB status
+    fetchDbStatus();
+    setInterval(fetchDbStatus, 30000);
 });
 
 function chartOptions(yLabel, dualAxis) {
@@ -253,7 +280,6 @@ function renderEnergyCharts(data) {
     }
 
     if (showPv && data.pvInputs && data.pvInputs.length > 0) {
-        // PV modules individually
         for (const pvNum of data.pvInputs) {
             const key = `pvModule${pvNum}`;
             if (data[key]) {
@@ -269,7 +295,6 @@ function renderEnergyCharts(data) {
             }
         }
     } else {
-        // PV total
         if (data.ppv) {
             datasets.push({
                 label: 'PV-Leistung (W)',
@@ -283,7 +308,6 @@ function renderEnergyCharts(data) {
         }
     }
 
-    // Grid (pac)
     if (data.pac) {
         datasets.push({
             label: 'Netz (W)',
@@ -296,7 +320,6 @@ function renderEnergyCharts(data) {
         });
     }
 
-    // Update main chart
     mainChart.data.labels = labels;
     mainChart.data.datasets = datasets;
     mainChart.options = chartOptions('W', true);
@@ -390,7 +413,6 @@ function refreshPanelChart() {
     const datasets = [];
 
     if (mode === 'power') {
-        // Power mode: V * A per PV module
         for (const pvNum of activeInputs) {
             const key = `pvModule${pvNum}`;
             if (data[key]) {
@@ -413,7 +435,6 @@ function refreshPanelChart() {
             font: { size: 14, weight: 'bold' },
         };
     } else {
-        // Voltage / Current mode
         for (const pvNum of activeInputs) {
             const vKey = `pv${pvNum}Voltage`;
             const iKey = `pv${pvNum}Current`;
@@ -463,7 +484,6 @@ function refreshPanelChart() {
     mainChart.data.datasets = datasets;
     mainChart.update();
 
-    // Clear consumption chart during panel view
     consumptionChart.data.labels = [];
     consumptionChart.data.datasets = [];
     consumptionChart.update();
@@ -504,4 +524,251 @@ function stopAutoRefresh() {
     }
     document.getElementById('refreshIndicator').classList.remove('active');
     document.getElementById('chkAutoRefresh').checked = false;
+}
+
+// ==================================================================
+// History Tab
+// ==================================================================
+
+function initHistorySelectors() {
+    const yearSel = document.getElementById('historyYear');
+    const currentYear = new Date().getFullYear();
+    for (let y = currentYear; y >= currentYear - 5; y--) {
+        const opt = document.createElement('option');
+        opt.value = y;
+        opt.textContent = y;
+        yearSel.appendChild(opt);
+    }
+
+    const monthSel = document.getElementById('historyMonth');
+    const monthNames = ['Januar', 'Februar', 'Maerz', 'April', 'Mai', 'Juni',
+                        'Juli', 'August', 'September', 'Oktober', 'November', 'Dezember'];
+    monthNames.forEach((name, i) => {
+        const opt = document.createElement('option');
+        opt.value = i + 1;
+        opt.textContent = name;
+        monthSel.appendChild(opt);
+    });
+}
+
+async function fetchMonthlyHistory(year) {
+    if (!year) {
+        year = document.getElementById('historyYear').value;
+    }
+    document.getElementById('historyMonth').value = '';
+
+    try {
+        const resp = await fetch(`/api/history/monthly?year=${year}`);
+        const json = await resp.json();
+        renderMonthlyChart(json.data, year);
+    } catch (err) {
+        console.error('fetchMonthlyHistory failed:', err);
+    }
+}
+
+function renderMonthlyChart(data, year) {
+    const ctx = document.getElementById('historyChart').getContext('2d');
+    if (historyChart) historyChart.destroy();
+
+    const monthNames = ['Jan', 'Feb', 'Mär', 'Apr', 'Mai', 'Jun',
+                        'Jul', 'Aug', 'Sep', 'Okt', 'Nov', 'Dez'];
+
+    const values = new Array(12).fill(0);
+    data.forEach(row => {
+        const m = parseInt(row.month.split('-')[1], 10) - 1;
+        values[m] = Math.round(row.total_kwh * 100) / 100;
+    });
+
+    historyChart = new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: monthNames,
+            datasets: [{
+                label: `kWh/Monat (${year})`,
+                data: values,
+                backgroundColor: 'rgba(255, 165, 0, 0.7)',
+                borderColor: 'rgba(255, 140, 0, 1)',
+                borderWidth: 1,
+            }],
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            onClick: (evt, elements) => {
+                if (elements.length > 0) {
+                    const monthIdx = elements[0].index;
+                    drillDownToMonth(year, monthIdx + 1);
+                }
+            },
+            plugins: {
+                tooltip: {
+                    callbacks: {
+                        afterLabel: (ctx) => {
+                            const row = data.find(r => parseInt(r.month.split('-')[1], 10) - 1 === ctx.dataIndex);
+                            if (row) {
+                                return `Tage: ${row.days_recorded} | Ø ${(row.avg_daily_kwh || 0).toFixed(1)} kWh/Tag`;
+                            }
+                            return '';
+                        }
+                    }
+                },
+                legend: { display: true },
+            },
+            scales: {
+                y: {
+                    beginAtZero: true,
+                    title: { display: true, text: 'kWh' },
+                },
+            },
+        },
+    });
+}
+
+// -- Daily drill-down --
+
+function drillDownToMonth(year, month) {
+    document.getElementById('historyMonth').value = String(month);
+    fetchDailyHistory(year, month);
+}
+
+function onHistoryMonthSelect() {
+    const month = document.getElementById('historyMonth').value;
+    const year = document.getElementById('historyYear').value;
+    if (month) {
+        fetchDailyHistory(year, parseInt(month, 10));
+    } else {
+        fetchMonthlyHistory(year);
+    }
+}
+
+async function fetchDailyHistory(year, month) {
+    const start = `${year}-${String(month).padStart(2, '0')}-01`;
+    const lastDay = new Date(year, month, 0).getDate();
+    const end = `${year}-${String(month).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
+
+    try {
+        const resp = await fetch(`/api/history/daily?start=${start}&end=${end}`);
+        const json = await resp.json();
+        renderDailyChart(json.data, year, month);
+    } catch (err) {
+        console.error('fetchDailyHistory failed:', err);
+    }
+}
+
+function renderDailyChart(data, year, month) {
+    const ctx = document.getElementById('historyChart').getContext('2d');
+    if (historyChart) historyChart.destroy();
+
+    const monthNames = ['Januar', 'Februar', 'Maerz', 'April', 'Mai', 'Juni',
+                        'Juli', 'August', 'September', 'Oktober', 'November', 'Dezember'];
+
+    const lastDay = new Date(year, month, 0).getDate();
+    const labels = [];
+    const values = [];
+    for (let d = 1; d <= lastDay; d++) {
+        const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+        labels.push(String(d));
+        const row = data.find(r => r.date === dateStr);
+        values.push(row ? Math.round(row.e_today * 100) / 100 : 0);
+    }
+
+    historyChart = new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: labels,
+            datasets: [{
+                label: `kWh/Tag — ${monthNames[month - 1]} ${year}`,
+                data: values,
+                backgroundColor: 'rgba(54, 162, 235, 0.7)',
+                borderColor: 'rgba(54, 162, 235, 1)',
+                borderWidth: 1,
+            }],
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                tooltip: {
+                    callbacks: {
+                        afterLabel: (ctx) => {
+                            const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(ctx.dataIndex + 1).padStart(2, '0')}`;
+                            const row = data.find(r => r.date === dateStr);
+                            if (row) {
+                                return `Peak: ${row.peak_power || 0} W | SOC: ${row.min_soc || 0}–${row.max_soc || 0}%`;
+                            }
+                            return '';
+                        }
+                    }
+                },
+                legend: { display: true },
+            },
+            scales: {
+                y: {
+                    beginAtZero: true,
+                    title: { display: true, text: 'kWh' },
+                },
+            },
+        },
+    });
+}
+
+// ==================================================================
+// Statistics Tab
+// ==================================================================
+
+async function fetchStatistics() {
+    try {
+        const resp = await fetch('/api/history/statistics');
+        const stats = await resp.json();
+
+        document.getElementById('statBestDay').textContent =
+            stats.best_day.kwh ? `${stats.best_day.kwh.toFixed(2)} kWh` : '—';
+        document.getElementById('statBestDayDate').textContent =
+            stats.best_day.date || '';
+
+        document.getElementById('statMaxPower').textContent =
+            stats.max_power.watts ? `${stats.max_power.watts.toFixed(0)} W` : '—';
+        document.getElementById('statMaxPowerDate').textContent =
+            stats.max_power.date || '';
+
+        document.getElementById('statTotalKwh').textContent =
+            stats.total_kwh ? `${stats.total_kwh.toFixed(1)} kWh` : '—';
+        document.getElementById('statTotalDays').textContent =
+            stats.days_recorded ? `${stats.days_recorded} Tage erfasst` : '';
+
+        document.getElementById('statAvgDaily').textContent =
+            stats.avg_daily_kwh ? `${stats.avg_daily_kwh.toFixed(2)}` : '—';
+    } catch (err) {
+        console.error('fetchStatistics failed:', err);
+    }
+}
+
+// ==================================================================
+// DB Status
+// ==================================================================
+
+async function fetchDbStatus() {
+    try {
+        const resp = await fetch('/api/db-status');
+        const info = await resp.json();
+
+        document.getElementById('dbDaysRecorded').textContent = info.days_recorded || 0;
+
+        const range = (info.oldest_date && info.newest_date)
+            ? `${info.oldest_date} — ${info.newest_date}`
+            : '—';
+        document.getElementById('dbDateRange').textContent = range;
+
+        document.getElementById('dbLastFetched').textContent =
+            info.last_fetched ? new Date(info.last_fetched).toLocaleString('de-DE') : '—';
+
+        const sched = info.scheduler || {};
+        let stateText = sched.running ? 'Aktiv' : 'Gestoppt';
+        if (sched.state === 'backfilling' && sched.backfill_progress) {
+            stateText = `Backfill ${sched.backfill_progress}`;
+        }
+        document.getElementById('schedulerState').textContent = stateText;
+    } catch (err) {
+        console.error('fetchDbStatus failed:', err);
+    }
 }

@@ -14,10 +14,25 @@
         <h1>Growatt Nexa 2000 - Solar Monitor</h1>
         <div class="subtitle">Linux Web Edition</div>
     </div>
-    <div id="connectionStatus" style="font-size:0.85rem; opacity:0.8;">Nicht verbunden</div>
+    <div style="text-align:right;">
+        <div id="connectionStatus" style="font-size:0.85rem; opacity:0.8;">Nicht verbunden</div>
+        <div class="version-badge">v{{ version }} | Build {{ build }}</div>
+    </div>
 </div>
 
 <div class="container">
+
+<!-- Tab Navigation -->
+<nav class="tab-nav">
+    <button class="tab-btn active" data-tab="live" onclick="switchTab('live')">Live</button>
+    <button class="tab-btn" data-tab="history" onclick="switchTab('history')">Verlauf</button>
+    <button class="tab-btn" data-tab="statistics" onclick="switchTab('statistics')">Statistiken</button>
+</nav>
+
+<!-- ============================================================ -->
+<!-- TAB: Live (original layout) -->
+<!-- ============================================================ -->
+<section class="tab-content active" id="tab-live">
 <div class="layout">
 
 <!-- Left sidebar -->
@@ -92,7 +107,7 @@
         </div>
     </div>
 
-    <!-- Panel Filter (shown during Panel-Details) -->
+    <!-- Panel Filter -->
     <div class="card panel-filter" id="panelFilterCard">
         <h3>Panel-Filter</h3>
         <div class="radio-group">
@@ -100,6 +115,17 @@
             <label><input type="radio" name="panelMode" value="va" onchange="refreshPanelChart()"> Spannung/Strom</label>
         </div>
         <div class="pv-checkboxes" id="pvCheckboxes"></div>
+    </div>
+
+    <!-- DB Status -->
+    <div class="card" id="dbStatusCard">
+        <h3>Datenbank</h3>
+        <div class="db-status-grid">
+            <span class="label">Tage erfasst:</span> <span id="dbDaysRecorded">—</span>
+            <span class="label">Zeitraum:</span> <span id="dbDateRange">—</span>
+            <span class="label">Letzter Abruf:</span> <span id="dbLastFetched">—</span>
+            <span class="label">Scheduler:</span> <span id="schedulerState">—</span>
+        </div>
     </div>
 
     <!-- Log -->
@@ -121,6 +147,53 @@
 </div>
 
 </div>
+</section>
+
+<!-- ============================================================ -->
+<!-- TAB: Verlauf (History) -->
+<!-- ============================================================ -->
+<section class="tab-content" id="tab-history">
+    <div class="history-controls">
+        <label for="historyYear">Jahr:</label>
+        <select id="historyYear" onchange="fetchMonthlyHistory()"></select>
+        <label for="historyMonth">Monat:</label>
+        <select id="historyMonth" onchange="onHistoryMonthSelect()">
+            <option value="">— Jahresuebersicht —</option>
+        </select>
+    </div>
+    <div class="chart-card history-chart-container">
+        <canvas id="historyChart"></canvas>
+    </div>
+</section>
+
+<!-- ============================================================ -->
+<!-- TAB: Statistiken -->
+<!-- ============================================================ -->
+<section class="tab-content" id="tab-statistics">
+    <div class="stats-grid">
+        <div class="stat-card">
+            <div class="stat-label">Bester Tag</div>
+            <div class="stat-value" id="statBestDay">—</div>
+            <div class="stat-detail" id="statBestDayDate"></div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">Max. Leistung</div>
+            <div class="stat-value" id="statMaxPower">—</div>
+            <div class="stat-detail" id="statMaxPowerDate"></div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">Gesamtertrag</div>
+            <div class="stat-value" id="statTotalKwh">—</div>
+            <div class="stat-detail" id="statTotalDays"></div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">Tagesdurchschnitt</div>
+            <div class="stat-value" id="statAvgDaily">—</div>
+            <div class="stat-detail">kWh/Tag</div>
+        </div>
+    </div>
+</section>
+
 </div>
 
 <script src="/static/js/app.js"></script>

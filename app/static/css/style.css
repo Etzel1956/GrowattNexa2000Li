@@ -9,6 +9,7 @@
     --text: #212529;
     --muted: #6c757d;
     --border: #dee2e6;
+    --accent: #ffa500;
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -39,6 +40,11 @@ body {
     font-size: 0.8rem;
     opacity: 0.8;
 }
+.version-badge {
+    font-size: 0.7rem;
+    opacity: 0.6;
+    margin-top: 2px;
+}
 
 /* Layout */
 .container {
@@ -57,6 +63,48 @@ body {
     .layout {
         grid-template-columns: 1fr;
     }
+}
+
+/* ── Tab Navigation ──────────────────────────────────────────── */
+
+.tab-nav {
+    display: flex;
+    gap: 4px;
+    margin-bottom: 15px;
+    border-bottom: 2px solid var(--border);
+    padding-bottom: 0;
+}
+
+.tab-btn {
+    padding: 10px 24px;
+    border: none;
+    background: transparent;
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: var(--muted);
+    cursor: pointer;
+    border-bottom: 3px solid transparent;
+    margin-bottom: -2px;
+    transition: color 0.2s, border-color 0.2s;
+}
+
+.tab-btn:hover {
+    color: var(--text);
+}
+
+.tab-btn.active {
+    color: var(--accent);
+    border-bottom-color: var(--accent);
+}
+
+/* ── Tab content ─────────────────────────────────────────────── */
+
+.tab-content {
+    display: none;
+}
+
+.tab-content.active {
+    display: block;
 }
 
 /* Cards */
@@ -215,6 +263,17 @@ body {
     max-height: 400px;
 }
 
+/* DB Status */
+.db-status-grid {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 4px 10px;
+    font-size: 0.82rem;
+}
+.db-status-grid .label {
+    color: var(--muted);
+}
+
 /* Log */
 .log-area {
     max-height: 200px;
@@ -252,4 +311,74 @@ body {
 }
 .refresh-indicator.active {
     display: block;
+}
+
+/* ── History Tab ─────────────────────────────────────────────── */
+
+.history-controls {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 16px;
+}
+
+.history-controls label {
+    font-size: 0.9rem;
+    font-weight: 500;
+    color: #555;
+}
+
+.history-controls select {
+    padding: 6px 12px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    font-size: 0.9rem;
+    background: #fff;
+}
+
+.history-chart-container {
+    height: 450px;
+    position: relative;
+}
+
+/* ── Statistics Tab ──────────────────────────────────────────── */
+
+.stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 20px;
+}
+
+.stat-card {
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 24px;
+    text-align: center;
+    transition: transform 0.15s, box-shadow 0.15s;
+}
+
+.stat-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+.stat-label {
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--muted);
+    margin-bottom: 8px;
+}
+
+.stat-value {
+    font-size: 1.8rem;
+    font-weight: 700;
+    color: var(--accent);
+    margin-bottom: 4px;
+}
+
+.stat-detail {
+    font-size: 0.82rem;
+    color: #999;
 }

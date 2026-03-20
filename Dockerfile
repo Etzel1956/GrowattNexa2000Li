@@ -7,6 +7,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
+VOLUME /app/data
+
 EXPOSE 8080
 
 CMD ["python", "run.py"]

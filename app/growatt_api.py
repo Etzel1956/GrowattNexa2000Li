@@ -483,6 +483,91 @@ class GrowattApi:
         return await self.fetch_day_chart(selected_date)
 
     # ------------------------------------------------------------------
+    # History helpers (for scheduler / DB)
+    # ------------------------------------------------------------------
+
+    async def fetch_day_intervals(self, day: str) -> list[dict] | None:
+        """Fetch intraday records for DB storage. Returns list of dicts."""
+        import json
+        try:
+            raw = await self._post("/device/getNoahHistory", {
+                "deviceSn": self.storage_sn, "start": "0",
+                "startDate": day, "endDate": day,
+            })
+            if '"result":-1' in raw or len(raw) < 50:
+                return None
+            data = json.loads(raw)
+            obj = self._get_response_obj(data)
+            datas = obj.get("datas", obj) if isinstance(obj, dict) else obj
+            if not isinstance(datas, list):
+                return None
+
+            records = []
+            soc_fields = ["soc", "totalBatteryPackSoc", "capacity", "batSoc"]
+            load_fields = ["totalHouseholdLoad", "householdLoadApartFromGroplug",
+                           "loadPower", "ctSelfPower"]
+
+            for r in datas:
+                if not isinstance(r, dict):
+                    continue
+                time_val = str(r.get("time", r.get("dataTime", r.get("calendar", ""))))
+                if len(time_val) > 11:
+                    time_val = time_val[11:16]
+
+                soc_val = None
+                for sf in soc_fields:
+                    if sf in r:
+                        soc_val = self._num(r[sf])
+                        if soc_val is not None:
+                            break
+
+                load_val = None
+                for lf in load_fields:
+                    if lf in r:
+                        load_val = self._num(r[lf])
+                        if load_val is not None:
+                            break
+
+                records.append({
+                    "time": time_val,
+                    "ppv": self._num(r.get("ppv")),
+                    "pac": self._num(r.get("pac")),
+                    "soc": soc_val,
+                    "load_power": load_val,
+                })
+            return records if records else None
+        except Exception:
+            return None
+
+    async def fetch_day_summary(self, day: str) -> dict | None:
+        """Compute a daily summary from intraday records.
+
+        Returns: {e_today, peak_power, peak_load, min_soc, max_soc}
+        """
+        records = await self.fetch_day_intervals(day)
+        if not records:
+            return None
+
+        ppv_values = [r["ppv"] for r in records if r["ppv"] is not None]
+        load_values = [r["load_power"] for r in records if r["load_power"] is not None]
+        soc_values = [r["soc"] for r in records if r["soc"] is not None]
+
+        if not ppv_values:
+            return None
+
+        # Approximate kWh: assume 5-min intervals
+        interval_hours = 5 / 60
+        e_today = sum(ppv_values) * interval_hours / 1000
+
+        return {
+            "e_today": round(e_today, 2),
+            "peak_power": max(ppv_values) if ppv_values else 0,
+            "peak_load": max(load_values) if load_values else 0,
+            "min_soc": min(soc_values) if soc_values else 0,
+            "max_soc": max(soc_values) if soc_values else 0,
+        }
+
+    # ------------------------------------------------------------------
     # Cleanup
     # ------------------------------------------------------------------
 
