@@ -487,55 +487,67 @@ class GrowattApi:
     # ------------------------------------------------------------------
 
     async def fetch_day_intervals(self, day: str) -> list[dict] | None:
-        """Fetch intraday records for DB storage. Returns list of dicts."""
+        """Fetch intraday records for DB storage. Returns list of dicts.
+
+        Handles API pagination by incrementing the 'start' offset until
+        no more data is returned.
+        """
         import json
+
+        soc_fields = ["soc", "totalBatteryPackSoc", "capacity", "batSoc"]
+        load_fields = ["totalHouseholdLoad", "householdLoadApartFromGroplug",
+                       "loadPower", "ctSelfPower"]
+
+        all_records = []
+        page_start = 0
+        max_pages = 20  # Safety limit
+
         try:
-            raw = await self._post("/device/getNoahHistory", {
-                "deviceSn": self.storage_sn, "start": "0",
-                "startDate": day, "endDate": day,
-            })
-            if '"result":-1' in raw or len(raw) < 50:
-                return None
-            data = json.loads(raw)
-            obj = self._get_response_obj(data)
-            datas = obj.get("datas", obj) if isinstance(obj, dict) else obj
-            if not isinstance(datas, list):
-                return None
-
-            records = []
-            soc_fields = ["soc", "totalBatteryPackSoc", "capacity", "batSoc"]
-            load_fields = ["totalHouseholdLoad", "householdLoadApartFromGroplug",
-                           "loadPower", "ctSelfPower"]
-
-            for r in datas:
-                if not isinstance(r, dict):
-                    continue
-                time_val = str(r.get("time", r.get("dataTime", r.get("calendar", ""))))
-                if len(time_val) > 11:
-                    time_val = time_val[11:16]
-
-                soc_val = None
-                for sf in soc_fields:
-                    if sf in r:
-                        soc_val = self._num(r[sf])
-                        if soc_val is not None:
-                            break
-
-                load_val = None
-                for lf in load_fields:
-                    if lf in r:
-                        load_val = self._num(r[lf])
-                        if load_val is not None:
-                            break
-
-                records.append({
-                    "time": time_val,
-                    "ppv": self._num(r.get("ppv")),
-                    "pac": self._num(r.get("pac")),
-                    "soc": soc_val,
-                    "load_power": load_val,
+            for _ in range(max_pages):
+                raw = await self._post("/device/getNoahHistory", {
+                    "deviceSn": self.storage_sn, "start": str(page_start),
+                    "startDate": day, "endDate": day,
                 })
-            return records if records else None
+                if '"result":-1' in raw or len(raw) < 50:
+                    break
+                data = json.loads(raw)
+                obj = self._get_response_obj(data)
+                datas = obj.get("datas", obj) if isinstance(obj, dict) else obj
+                if not isinstance(datas, list) or len(datas) == 0:
+                    break
+
+                for r in datas:
+                    if not isinstance(r, dict):
+                        continue
+                    time_val = str(r.get("time", r.get("dataTime", r.get("calendar", ""))))
+                    if len(time_val) > 11:
+                        time_val = time_val[11:16]
+
+                    soc_val = None
+                    for sf in soc_fields:
+                        if sf in r:
+                            soc_val = self._num(r[sf])
+                            if soc_val is not None:
+                                break
+
+                    load_val = None
+                    for lf in load_fields:
+                        if lf in r:
+                            load_val = self._num(r[lf])
+                            if load_val is not None:
+                                break
+
+                    all_records.append({
+                        "time": time_val,
+                        "ppv": self._num(r.get("ppv")),
+                        "pac": self._num(r.get("pac")),
+                        "soc": soc_val,
+                        "load_power": load_val,
+                    })
+
+                page_start += len(datas)
+
+            return all_records if all_records else None
         except Exception:
             return None
 
