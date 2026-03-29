@@ -555,9 +555,8 @@ class GrowattApi:
         if not ppv_values:
             return None
 
-        # Approximate kWh: assume 5-min intervals
-        interval_hours = 5 / 60
-        e_today = sum(ppv_values) * interval_hours / 1000
+        # Trapezoidal integration using actual timestamps for accurate kWh
+        e_today = self._integrate_energy(records)
 
         return {
             "e_today": round(e_today, 2),
@@ -566,6 +565,48 @@ class GrowattApi:
             "min_soc": min(soc_values) if soc_values else 0,
             "max_soc": max(soc_values) if soc_values else 0,
         }
+
+    @staticmethod
+    def _parse_time_minutes(time_str: str) -> float | None:
+        """Parse 'HH:MM' string to minutes since midnight."""
+        try:
+            parts = time_str.strip().split(":")
+            return int(parts[0]) * 60 + int(parts[1])
+        except (ValueError, IndexError):
+            return None
+
+    def _integrate_energy(self, records: list[dict]) -> float:
+        """Trapezoidal integration of ppv (W) over actual time intervals.
+
+        Returns energy in kWh.
+        """
+        # Build list of (minutes_since_midnight, ppv_watts) with valid entries
+        points = []
+        for r in records:
+            if r["ppv"] is None:
+                continue
+            t = self._parse_time_minutes(r.get("time", ""))
+            if t is not None:
+                points.append((t, r["ppv"]))
+
+        if len(points) < 2:
+            return 0.0
+
+        # Sort by time
+        points.sort(key=lambda p: p[0])
+
+        # Trapezoidal rule: sum((ppv[i] + ppv[i+1]) / 2 * dt_hours)
+        energy_wh = 0.0
+        for i in range(len(points) - 1):
+            dt_minutes = points[i + 1][0] - points[i][0]
+            if dt_minutes <= 0 or dt_minutes > 30:
+                # Skip gaps > 30 min (night, outages) or duplicate timestamps
+                continue
+            dt_hours = dt_minutes / 60.0
+            avg_power = (points[i][1] + points[i + 1][1]) / 2.0
+            energy_wh += avg_power * dt_hours
+
+        return energy_wh / 1000.0  # Convert Wh to kWh
 
     # ------------------------------------------------------------------
     # Cleanup

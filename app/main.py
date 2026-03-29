@@ -18,7 +18,7 @@ from .database import (
     get_statistics,
     init_db,
 )
-from .scheduler import get_scheduler_status, start_scheduler, stop_scheduler
+from .scheduler import get_scheduler_status, rebackfill_all, start_scheduler, stop_scheduler
 
 load_dotenv()
 
@@ -171,6 +171,14 @@ async def api_db_status():
     db_info = await get_db_status()
     sched_info = get_scheduler_status()
     return {**db_info, "scheduler": sched_info}
+
+
+@app.post("/api/history/rebackfill")
+async def api_rebackfill():
+    """Re-fetch and recalculate all historical daily summaries."""
+    import asyncio
+    asyncio.create_task(rebackfill_all())
+    return {"status": "rebackfill started"}
 
 
 # ------------------------------------------------------------------

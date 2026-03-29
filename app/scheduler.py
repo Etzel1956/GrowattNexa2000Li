@@ -130,3 +130,31 @@ async def _backfill() -> None:
     _scheduler_status["state"] = "running"
     _scheduler_status["backfill_progress"] = None
     logger.info("Backfill complete")
+
+
+async def rebackfill_all() -> None:
+    """Re-fetch and recalculate ALL days in the database (e.g. after a formula fix)."""
+    if not _api:
+        return
+    _scheduler_status["state"] = "rebackfill"
+
+    today = date.today()
+    start = today - timedelta(days=BACKFILL_DAYS)
+    days_to_fill = []
+    current = start
+    while current <= today:
+        days_to_fill.append(current.isoformat())
+        current += timedelta(days=1)
+
+    total = len(days_to_fill)
+    logger.info("Re-backfill: %d days to recalculate", total)
+
+    for i, day in enumerate(days_to_fill):
+        _scheduler_status["backfill_progress"] = f"{i + 1}/{total}"
+        await _collect_day(day)
+        if i < total - 1:
+            await asyncio.sleep(2)
+
+    _scheduler_status["state"] = "running"
+    _scheduler_status["backfill_progress"] = None
+    logger.info("Re-backfill complete")
