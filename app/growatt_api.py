@@ -307,6 +307,96 @@ class GrowattApi:
         return {}
 
     # ------------------------------------------------------------------
+    # Monthly energy from Growatt server (pre-calculated daily kWh)
+    # ------------------------------------------------------------------
+
+    async def fetch_month_energy(self, year: int, month: int) -> dict[str, float]:
+        """Fetch daily kWh values for a month directly from Growatt server.
+
+        Returns dict mapping day strings ('2026-03-01') to kWh values.
+        """
+        import json
+
+        date_str = f"{year}-{month:02d}-01"
+        endpoints = [
+            "/noahDeviceApi/nexa/getDataChart",
+            "/noahDeviceApi/noah/getDataChart",
+        ]
+
+        for ep in endpoints:
+            try:
+                raw = await self._post(ep, {
+                    "deviceSn": self.storage_sn,
+                    "dateTime": date_str,
+                    "dateType": "1",  # 1 = monthly view (daily breakdown)
+                })
+                if '"result":-1' in raw or len(raw) < 50:
+                    continue
+
+                data = json.loads(raw)
+                obj = self._get_response_obj(data)
+
+                # Try to find the daily energy chart data
+                if not isinstance(obj, dict):
+                    continue
+
+                daily_kwh: dict[str, float] = {}
+
+                # Look for chart arrays with daily values
+                for key in ["pvs", "charts", "datas", "chartData"]:
+                    candidate = obj.get(key)
+                    if isinstance(candidate, dict):
+                        # Dict keyed by date or day number
+                        for k, v in candidate.items():
+                            val = self._num(v)
+                            if val is not None and val >= 0:
+                                try:
+                                    day_num = int(k)
+                                    day_key = f"{year}-{month:02d}-{day_num:02d}"
+                                    daily_kwh[day_key] = val
+                                except ValueError:
+                                    daily_kwh[k] = val
+                    elif isinstance(candidate, list):
+                        for i, v in enumerate(candidate):
+                            val = self._num(v) if not isinstance(v, dict) else None
+                            if val is not None and val >= 0:
+                                day_key = f"{year}-{month:02d}-{i + 1:02d}"
+                                daily_kwh[day_key] = val
+
+                if daily_kwh:
+                    return daily_kwh
+
+                # Return raw obj for debugging if no known structure found
+                self._last_month_raw = obj
+
+            except Exception:
+                continue
+
+        return {}
+
+    async def debug_month_raw(self, year: int, month: int) -> Any:
+        """Return raw API response for monthly chart data (for debugging)."""
+        import json
+        date_str = f"{year}-{month:02d}-01"
+        endpoints = [
+            "/noahDeviceApi/nexa/getDataChart",
+            "/noahDeviceApi/noah/getDataChart",
+        ]
+        for ep in endpoints:
+            try:
+                raw = await self._post(ep, {
+                    "deviceSn": self.storage_sn,
+                    "dateTime": date_str,
+                    "dateType": "1",
+                })
+                if '"result":-1' in raw or len(raw) < 50:
+                    continue
+                return {"endpoint": ep, "data": json.loads(raw)}
+            except Exception:
+                continue
+        return {"error": "no data from any endpoint"}
+
+    # ------------------------------------------------------------------
     # Day chart (history)
     # ------------------------------------------------------------------
 

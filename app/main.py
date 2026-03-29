@@ -181,6 +181,12 @@ async def api_rebackfill():
     return {"status": "rebackfill started"}
 
 
+@app.get("/api/debug/month-raw")
+async def api_debug_month_raw(year: int = 2026, month: int = 3):
+    """Debug: show raw Growatt API response for monthly chart data."""
+    return await _api.debug_month_raw(year, month)
+
+
 # ------------------------------------------------------------------
 # Entry point
 # ------------------------------------------------------------------
