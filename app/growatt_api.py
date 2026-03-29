@@ -396,6 +396,35 @@ class GrowattApi:
                 continue
         return {"error": "no data from any endpoint"}
 
+    async def debug_day_raw(self, day: str) -> Any:
+        """Return raw API response for a single day (first record only)."""
+        import json
+        try:
+            raw = await self._post("/device/getNoahHistory", {
+                "deviceSn": self.storage_sn, "start": "0",
+                "startDate": day, "endDate": day,
+            })
+            data = json.loads(raw)
+            obj = self._get_response_obj(data)
+            # Return top-level keys and first record for inspection
+            result: dict[str, Any] = {"top_keys": list(data.keys()) if isinstance(data, dict) else "not_dict"}
+            if isinstance(obj, dict):
+                result["obj_keys"] = list(obj.keys())
+                datas = obj.get("datas", [])
+                if isinstance(datas, list) and datas:
+                    result["num_records"] = len(datas)
+                    result["first_record"] = datas[0]
+                    result["last_record"] = datas[-1]
+                # Check for any energy summary fields at top level
+                for key in ["eToday", "epvToday", "eacToday", "energy", "totalEnergy", "pvEnergy", "eDay"]:
+                    if key in obj:
+                        result[f"obj.{key}"] = obj[key]
+                    if key in data:
+                        result[f"root.{key}"] = data[key]
+            return result
+        except Exception as e:
+            return {"error": str(e)}
+
     # ------------------------------------------------------------------
     # Day chart (history)
     # ------------------------------------------------------------------

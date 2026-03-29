@@ -187,6 +187,12 @@ async def api_debug_month_raw(year: int = 2026, month: int = 3):
     return await api.debug_month_raw(year, month)
 
 
+@app.get("/api/debug/day-raw")
+async def api_debug_day_raw(day: str = "2026-03-01"):
+    """Debug: show raw Growatt API response for a single day."""
+    return await api.debug_day_raw(day)
+
+
 # ------------------------------------------------------------------
 # Entry point
 # ------------------------------------------------------------------
