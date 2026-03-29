@@ -662,6 +662,7 @@ class GrowattApi:
                         "pac": self._num(r.get("pac")),
                         "soc": soc_val,
                         "load_power": load_val,
+                        "eacToday": self._num(r.get("eacToday")),
                     })
 
                 page_start += len(datas)
@@ -672,6 +673,10 @@ class GrowattApi:
 
     async def fetch_day_summary(self, day: str) -> dict | None:
         """Compute a daily summary from intraday records.
+
+        Uses the Growatt server's pre-calculated eacToday field (max value
+        across all records) for accurate daily energy. Falls back to
+        trapezoidal integration if eacToday is not available.
 
         Returns: {e_today, peak_power, peak_load, min_soc, max_soc}
         """
@@ -686,8 +691,13 @@ class GrowattApi:
         if not ppv_values:
             return None
 
-        # Trapezoidal integration using actual timestamps for accurate kWh
-        e_today = self._integrate_energy(records)
+        # Prefer Growatt's pre-calculated eacToday (max value = end-of-day total)
+        eac_values = [r["eacToday"] for r in records if r.get("eacToday") is not None]
+        if eac_values:
+            e_today = max(eac_values)
+        else:
+            # Fallback: trapezoidal integration
+            e_today = self._integrate_energy(records)
 
         return {
             "e_today": round(e_today, 2),
