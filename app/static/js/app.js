@@ -275,7 +275,8 @@ document.addEventListener('keydown', (e) => {
 });
 
 // ------------------------------------------------------------------
-// Pad chart data to full 24 h (00:00 – 23:55, 5-min intervals)
+// Pad chart data to full 24 h – keeps original labels, adds
+// empty markers before/after so the x-axis spans 00:00 – 23:55
 // ------------------------------------------------------------------
 
 function padDataTo24h(data) {
@@ -290,28 +291,32 @@ function padDataTo24h(data) {
         if (t1 > t0) intervalMin = t1 - t0;
     }
 
-    // Build full 24 h label set
-    const fullLabels = [];
-    for (let m = 0; m < 1440; m += intervalMin) {
-        fullLabels.push(minutesToTime(m));
+    // Build padding labels BEFORE first data point
+    const firstMin = timeToMinutes(srcLabels[0]);
+    const lastMin  = timeToMinutes(srcLabels[srcLabels.length - 1]);
+    const before = [];
+    for (let m = 0; m < firstMin; m += intervalMin) {
+        before.push(minutesToTime(m));
+    }
+    // Build padding labels AFTER last data point
+    const after = [];
+    for (let m = lastMin + intervalMin; m < 1440; m += intervalMin) {
+        after.push(minutesToTime(m));
     }
 
-    // Build a lookup: "HH:MM" → index in source
-    const srcIndex = {};
-    srcLabels.forEach((lbl, i) => { srcIndex[lbl] = i; });
+    // Combine: [before nulls] + [original data] + [after nulls]
+    const fullLabels = [...before, ...srcLabels, ...after];
 
     // Data keys to pad (all arrays with same length as timeLabels)
     const arrayKeys = Object.keys(data).filter(
         k => k !== 'timeLabels' && k !== 'pvInputs' && Array.isArray(data[k]) && data[k].length === srcLabels.length
     );
 
-    // Build padded arrays
     const padded = { timeLabels: fullLabels, pvInputs: data.pvInputs };
+    const nullsBefore = new Array(before.length).fill(null);
+    const nullsAfter  = new Array(after.length).fill(null);
     for (const key of arrayKeys) {
-        padded[key] = fullLabels.map(lbl => {
-            const idx = srcIndex[lbl];
-            return idx !== undefined ? data[key][idx] : null;
-        });
+        padded[key] = [...nullsBefore, ...data[key], ...nullsAfter];
     }
     return padded;
 }
