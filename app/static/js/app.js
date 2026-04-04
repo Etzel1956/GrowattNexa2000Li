@@ -82,14 +82,6 @@ function switchTab(name) {
 document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('selectedDate').value = todayStr();
 
-    // Register zoom plugin explicitly (auto-register fails in some setups)
-    if (typeof ChartZoom !== 'undefined') {
-        Chart.register(ChartZoom);
-        console.log('chartjs-plugin-zoom registered OK');
-    } else {
-        console.warn('chartjs-plugin-zoom NOT loaded – zoom/pan disabled');
-    }
-
     // Init Chart.js – Live charts
     mainChart = new Chart(document.getElementById('chartMain'), {
         type: 'line',
@@ -100,6 +92,15 @@ document.addEventListener('DOMContentLoaded', () => {
         type: 'line',
         data: { labels: [], datasets: [] },
         options: chartOptions('W', false),
+    });
+
+    // Synchronized mouse-wheel zoom on both chart canvases
+    ['chartMain', 'chartConsumption'].forEach(id => {
+        document.getElementById(id).addEventListener('wheel', (e) => {
+            if (chartView.total === 0) return;
+            e.preventDefault();
+            zoomCharts(e.deltaY > 0 ? 'out' : 'in');
+        }, { passive: false });
     });
 
     // Init year/month selectors
@@ -122,21 +123,6 @@ function chartOptions(yLabel, dualAxis) {
         plugins: {
             legend: { position: 'top', labels: { usePointStyle: true, pointStyle: 'circle' } },
             tooltip: { mode: 'index', intersect: false },
-            zoom: {
-                pan: {
-                    enabled: !isTouchDevice(),  // disabled on touch until fullscreen
-                    mode: 'x',
-                    threshold: 10,
-                },
-                zoom: {
-                    wheel: { enabled: true },
-                    pinch: { enabled: true },
-                    mode: 'x',
-                },
-                limits: {
-                    x: { minRange: 12 },   // minimum ~1 hour visible (12 × 5 min)
-                },
-            },
         },
         scales: {
             x: {
@@ -221,10 +207,17 @@ function resetChartZoom() {
     applyChartViewToAll();
 }
 
-function initChartView(totalLabels) {
-    chartView.total = totalLabels;
-    chartView.start = 0;
-    chartView.end = Math.max(0, totalLabels - 1);
+// Called on every data refresh – keeps current zoom window if total hasn't changed
+function updateChartView(totalLabels) {
+    if (chartView.total === totalLabels && chartView.total > 0) {
+        // Same label count (same date, just refreshed data) – keep zoom
+        applyChartViewToAll();
+    } else {
+        // New date or first load – reset to full 24h
+        chartView.total = totalLabels;
+        chartView.start = 0;
+        chartView.end = Math.max(0, totalLabels - 1);
+    }
 }
 
 // ------------------------------------------------------------------
@@ -239,31 +232,11 @@ function toggleFullscreen(cardId) {
     const canvas = card.querySelector('canvas');
     const chart = canvas.id === 'chartMain' ? mainChart : consumptionChart;
 
-    // In fullscreen: enable touch pan; in normal: disable it (so page scrolls)
-    updatePanForMode(chart, isFullscreen);
-
-    // Update the fullscreen button label
-    const fsBtn = card.querySelector('.chart-btn[title="Vollbild"], .chart-btn[title="Schliessen"]');
-    if (fsBtn) {
-        if (isFullscreen) {
-            fsBtn.textContent = '✕';
-            fsBtn.title = 'Schliessen';
-        } else {
-            fsBtn.textContent = '⛶';
-            fsBtn.title = 'Vollbild';
-        }
-    }
-
-    // Resize chart after layout change
-    setTimeout(() => chart.resize(), 50);
-}
-
-function updatePanForMode(chart, fullscreen) {
-    if (!chart.options.plugins.zoom) return;
-    // On touch devices: pan only in fullscreen. On desktop: always pan.
-    const enablePan = !isTouchDevice() || fullscreen;
-    chart.options.plugins.zoom.pan.enabled = enablePan;
-    chart.update('none');
+    // Resize charts after layout change
+    setTimeout(() => {
+        mainChart.resize();
+        consumptionChart.resize();
+    }, 50);
 }
 
 // ESC or back to close fullscreen chart
@@ -562,7 +535,7 @@ function renderEnergyCharts(data) {
         font: { size: 14, weight: 'bold' },
     };
     consumptionChart.update();
-    initChartView(labels.length);
+    updateChartView(labels.length);
 }
 
 function onPvModulesToggle() {
@@ -694,7 +667,7 @@ function refreshPanelChart() {
     mainChart.data.labels = labels;
     mainChart.data.datasets = datasets;
     mainChart.update();
-    initChartView(labels.length);
+    updateChartView(labels.length);
 
     consumptionChart.data.labels = [];
     consumptionChart.data.datasets = [];
