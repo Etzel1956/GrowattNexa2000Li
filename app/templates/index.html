@@ -140,28 +140,19 @@
 
 <!-- Right: Charts -->
 <div class="chart-area">
+    <div class="chart-toolbar">
+        <button class="chart-btn" onclick="panCharts('left')" title="Frueher">◀</button>
+        <button class="chart-btn" onclick="zoomCharts('in')" title="Zoom +">+</button>
+        <button class="chart-btn" onclick="zoomCharts('out')" title="Zoom −">−</button>
+        <button class="chart-btn" onclick="panCharts('right')" title="Spaeter">▶</button>
+        <button class="chart-btn" onclick="resetChartZoom()" title="Reset">↺ 24h</button>
+        <span class="chart-hint chart-hint-desktop">Mausrad = Zoom · Ziehen = Verschieben</span>
+        <span class="chart-hint chart-hint-mobile">◀▶ Verschieben · +− Zoom</span>
+    </div>
     <div class="chart-card" id="chartMainCard">
-        <div class="chart-toolbar">
-            <button class="chart-btn" onclick="panChart(mainChart, 'left')" title="Frueher">◀</button>
-            <button class="chart-btn" onclick="zoomChart(mainChart, 'in')" title="Zoom +">+</button>
-            <button class="chart-btn" onclick="zoomChart(mainChart, 'out')" title="Zoom −">−</button>
-            <button class="chart-btn" onclick="panChart(mainChart, 'right')" title="Spaeter">▶</button>
-            <button class="chart-btn" onclick="resetChartZoom(mainChart)" title="Reset">↺ 24h</button>
-            <button class="chart-btn" onclick="toggleFullscreen('chartMainCard')" title="Vollbild">⛶</button>
-            <span class="chart-hint chart-hint-desktop">Mausrad = Zoom · Ziehen = Verschieben</span>
-            <span class="chart-hint chart-hint-mobile">Vollbild für Touch-Zoom</span>
-        </div>
         <canvas id="chartMain"></canvas>
     </div>
     <div class="chart-card" id="chartConsumptionCard">
-        <div class="chart-toolbar">
-            <button class="chart-btn" onclick="panChart(consumptionChart, 'left')" title="Frueher">◀</button>
-            <button class="chart-btn" onclick="zoomChart(consumptionChart, 'in')" title="Zoom +">+</button>
-            <button class="chart-btn" onclick="zoomChart(consumptionChart, 'out')" title="Zoom −">−</button>
-            <button class="chart-btn" onclick="panChart(consumptionChart, 'right')" title="Spaeter">▶</button>
-            <button class="chart-btn" onclick="resetChartZoom(consumptionChart)" title="Reset">↺ 24h</button>
-            <button class="chart-btn" onclick="toggleFullscreen('chartConsumptionCard')" title="Vollbild">⛶</button>
-        </div>
         <canvas id="chartConsumption"></canvas>
     </div>
 </div>
