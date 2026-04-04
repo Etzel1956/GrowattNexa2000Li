@@ -12,6 +12,12 @@ let mainChart = null;
 let consumptionChart = null;
 let historyChart = null;
 
+// Zoom/pan view state per chart – stores index range into 24h labels
+const chartView = {
+    chartMain:        { start: 0, end: 0, total: 0 },
+    chartConsumption: { start: 0, end: 0, total: 0 },
+};
+
 // ------------------------------------------------------------------
 // Helpers
 // ------------------------------------------------------------------
@@ -158,20 +164,75 @@ function chartOptions(yLabel, dualAxis) {
     return opts;
 }
 
-// Zoom helper for toolbar buttons
-function zoomChart(chart, direction) {
-    if (typeof chart.zoom !== 'function') {
-        console.warn('Zoom plugin not available on chart');
-        return;
+// ------------------------------------------------------------------
+// Manual zoom / pan via x-axis min/max (works reliably on all scales)
+// ------------------------------------------------------------------
+
+function getChartViewKey(chart) {
+    return chart.canvas.id;  // 'chartMain' or 'chartConsumption'
+}
+
+function applyChartView(chart) {
+    const v = chartView[getChartViewKey(chart)];
+    if (!v || v.total === 0) return;
+    const labels = chart.data.labels;
+    if (v.start <= 0 && v.end >= v.total - 1) {
+        // Full range – remove min/max so Chart.js auto-fits
+        delete chart.options.scales.x.min;
+        delete chart.options.scales.x.max;
+    } else {
+        chart.options.scales.x.min = labels[v.start];
+        chart.options.scales.x.max = labels[v.end];
     }
-    const factor = direction === 'in' ? 1.5 : 0.667;
-    chart.zoom({ x: factor });
+    chart.update('none');
+}
+
+function zoomChart(chart, direction) {
+    const v = chartView[getChartViewKey(chart)];
+    if (!v || v.total === 0) return;
+    const visible = v.end - v.start;
+    // Zoom in: show fewer labels; zoom out: show more
+    const delta = Math.max(1, Math.round(visible * 0.2));
+    if (direction === 'in') {
+        if (visible <= 12) return;  // min ~1 hour visible
+        v.start = Math.min(v.start + delta, v.end - 12);
+        v.end   = Math.max(v.end - delta, v.start + 12);
+    } else {
+        v.start = Math.max(0, v.start - delta);
+        v.end   = Math.min(v.total - 1, v.end + delta);
+    }
+    applyChartView(chart);
+}
+
+function panChart(chart, direction) {
+    const v = chartView[getChartViewKey(chart)];
+    if (!v || v.total === 0) return;
+    const visible = v.end - v.start;
+    const step = Math.max(1, Math.round(visible * 0.25));
+    if (direction === 'left') {
+        const shift = Math.min(step, v.start);
+        v.start -= shift;
+        v.end   -= shift;
+    } else {
+        const shift = Math.min(step, v.total - 1 - v.end);
+        v.start += shift;
+        v.end   += shift;
+    }
+    applyChartView(chart);
 }
 
 function resetChartZoom(chart) {
-    if (typeof chart.resetZoom === 'function') {
-        chart.resetZoom();
-    }
+    const v = chartView[getChartViewKey(chart)];
+    if (!v) return;
+    v.start = 0;
+    v.end = v.total - 1;
+    applyChartView(chart);
+}
+
+function initChartView(chart) {
+    const key = getChartViewKey(chart);
+    const total = chart.data.labels.length;
+    chartView[key] = { start: 0, end: Math.max(0, total - 1), total: total };
 }
 
 // ------------------------------------------------------------------
@@ -479,6 +540,7 @@ function renderEnergyCharts(data) {
         font: { size: 14, weight: 'bold' },
     };
     mainChart.update();
+    initChartView(mainChart);
 
     // -- Consumption chart --
     const conDatasets = [];
@@ -504,6 +566,7 @@ function renderEnergyCharts(data) {
         font: { size: 14, weight: 'bold' },
     };
     consumptionChart.update();
+    initChartView(consumptionChart);
 }
 
 function onPvModulesToggle() {
@@ -635,6 +698,7 @@ function refreshPanelChart() {
     mainChart.data.labels = labels;
     mainChart.data.datasets = datasets;
     mainChart.update();
+    initChartView(mainChart);
 
     consumptionChart.data.labels = [];
     consumptionChart.data.datasets = [];
