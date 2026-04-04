@@ -13,7 +13,7 @@ let consumptionChart = null;
 let historyChart = null;
 
 // Shared zoom/pan view state – both charts show the same time window
-const chartView = { start: 0, end: 0, total: 0 };
+const chartView = { start: 0, end: 0, total: 0, date: null };
 
 // ------------------------------------------------------------------
 // Helpers
@@ -151,19 +151,25 @@ function chartOptions(yLabel, dualAxis) {
 // Synchronized zoom / pan – both charts share one time window
 // ------------------------------------------------------------------
 
-function applyChartViewToAll() {
+// Apply current zoom to a single chart's options (call BEFORE chart.update)
+function applyViewToOptions(chart) {
     const v = chartView;
-    if (v.total === 0) return;
+    if (v.total === 0 || !chart.data.labels.length) return;
+    const labels = chart.data.labels;
+    if (v.start <= 0 && v.end >= v.total - 1) {
+        delete chart.options.scales.x.min;
+        delete chart.options.scales.x.max;
+    } else {
+        chart.options.scales.x.min = labels[Math.max(0, v.start)];
+        chart.options.scales.x.max = labels[Math.min(labels.length - 1, v.end)];
+    }
+}
+
+// Apply zoom to both charts and redraw
+function syncCharts() {
     [mainChart, consumptionChart].forEach(chart => {
         if (!chart || !chart.data.labels.length) return;
-        const labels = chart.data.labels;
-        if (v.start <= 0 && v.end >= v.total - 1) {
-            delete chart.options.scales.x.min;
-            delete chart.options.scales.x.max;
-        } else {
-            chart.options.scales.x.min = labels[v.start];
-            chart.options.scales.x.max = labels[v.end];
-        }
+        applyViewToOptions(chart);
         chart.update('none');
     });
 }
@@ -181,7 +187,7 @@ function zoomCharts(direction) {
         v.start = Math.max(0, v.start - delta);
         v.end   = Math.min(v.total - 1, v.end + delta);
     }
-    applyChartViewToAll();
+    syncCharts();
 }
 
 function panCharts(direction) {
@@ -198,22 +204,25 @@ function panCharts(direction) {
         v.start += shift;
         v.end   += shift;
     }
-    applyChartViewToAll();
+    syncCharts();
 }
 
 function resetChartZoom() {
     chartView.start = 0;
     chartView.end = Math.max(0, chartView.total - 1);
-    applyChartViewToAll();
+    syncCharts();
 }
 
-// Called on every data refresh – keeps current zoom window if total hasn't changed
-function updateChartView(totalLabels) {
-    if (chartView.total === totalLabels && chartView.total > 0) {
-        // Same label count (same date, just refreshed data) – keep zoom
-        applyChartViewToAll();
+// Called after new data is loaded; resets zoom only on date change
+function onNewChartData(totalLabels, date) {
+    if (chartView.date === date) {
+        // Same date (auto-refresh) – keep zoom, just update total
+        chartView.total = totalLabels;
+        chartView.end = Math.min(chartView.end, totalLabels - 1);
+        chartView.start = Math.min(chartView.start, chartView.end);
     } else {
-        // New date or first load – reset to full 24h
+        // New date or first load – full range
+        chartView.date = date;
         chartView.total = totalLabels;
         chartView.start = 0;
         chartView.end = Math.max(0, totalLabels - 1);
@@ -501,6 +510,10 @@ function renderEnergyCharts(data) {
         });
     }
 
+    // Update zoom state (resets only on date change)
+    onNewChartData(labels.length, date);
+
+    // -- Main chart --
     mainChart.data.labels = labels;
     mainChart.data.datasets = datasets;
     mainChart.options = chartOptions('W', true);
@@ -509,11 +522,11 @@ function renderEnergyCharts(data) {
         text: (showPv ? 'PV-Module' : 'PV') + ` / Netz / SOC - ${date}`,
         font: { size: 14, weight: 'bold' },
     };
+    applyViewToOptions(mainChart);   // zoom BEFORE update
     mainChart.update();
 
     // -- Consumption chart --
     const conDatasets = [];
-    // Pad consumption data too
     if (padded.totalHouseholdLoad) {
         conDatasets.push({
             label: 'Verbrauch (W)',
@@ -534,8 +547,8 @@ function renderEnergyCharts(data) {
         text: `Verbrauch im Haus - ${date}`,
         font: { size: 14, weight: 'bold' },
     };
+    applyViewToOptions(consumptionChart);   // zoom BEFORE update
     consumptionChart.update();
-    updateChartView(labels.length);
 }
 
 function onPvModulesToggle() {
@@ -664,10 +677,11 @@ function refreshPanelChart() {
         };
     }
 
+    onNewChartData(labels.length, date);
     mainChart.data.labels = labels;
     mainChart.data.datasets = datasets;
+    applyViewToOptions(mainChart);
     mainChart.update();
-    updateChartView(labels.length);
 
     consumptionChart.data.labels = [];
     consumptionChart.data.datasets = [];
