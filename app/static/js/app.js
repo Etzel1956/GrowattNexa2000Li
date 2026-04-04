@@ -99,6 +99,10 @@ document.addEventListener('DOMContentLoaded', () => {
     setInterval(fetchDbStatus, 30000);
 });
 
+function isTouchDevice() {
+    return 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+}
+
 function chartOptions(yLabel, dualAxis) {
     const opts = {
         responsive: true,
@@ -107,10 +111,25 @@ function chartOptions(yLabel, dualAxis) {
         plugins: {
             legend: { position: 'top', labels: { usePointStyle: true, pointStyle: 'circle' } },
             tooltip: { mode: 'index', intersect: false },
+            zoom: {
+                pan: {
+                    enabled: !isTouchDevice(),  // disabled on touch until fullscreen
+                    mode: 'x',
+                    threshold: 10,
+                },
+                zoom: {
+                    wheel: { enabled: true },
+                    pinch: { enabled: true },
+                    mode: 'x',
+                },
+                limits: {
+                    x: { minRange: 12 },   // minimum ~1 hour visible (12 × 5 min)
+                },
+            },
         },
         scales: {
             x: {
-                ticks: { maxRotation: 45, autoSkip: true, maxTicksLimit: 14 },
+                ticks: { maxRotation: 45, autoSkip: true, maxTicksLimit: 18 },
                 grid: { color: '#eee' },
             },
             y: {
@@ -129,6 +148,115 @@ function chartOptions(yLabel, dualAxis) {
         };
     }
     return opts;
+}
+
+// Zoom helper for toolbar buttons
+function zoomChart(chart, direction) {
+    if (direction === 'in') {
+        chart.zoom(1.4);
+    } else {
+        chart.zoom(0.7);
+    }
+}
+
+// ------------------------------------------------------------------
+// Fullscreen chart mode (especially useful on mobile)
+// ------------------------------------------------------------------
+
+function toggleFullscreen(cardId) {
+    const card = document.getElementById(cardId);
+    const isFullscreen = card.classList.toggle('fullscreen');
+
+    // Find the chart instance for this card
+    const canvas = card.querySelector('canvas');
+    const chart = canvas.id === 'chartMain' ? mainChart : consumptionChart;
+
+    // In fullscreen: enable touch pan; in normal: disable it (so page scrolls)
+    updatePanForMode(chart, isFullscreen);
+
+    // Update the fullscreen button label
+    const fsBtn = card.querySelector('.chart-btn[title="Vollbild"], .chart-btn[title="Schliessen"]');
+    if (fsBtn) {
+        if (isFullscreen) {
+            fsBtn.textContent = '✕';
+            fsBtn.title = 'Schliessen';
+        } else {
+            fsBtn.textContent = '⛶';
+            fsBtn.title = 'Vollbild';
+        }
+    }
+
+    // Resize chart after layout change
+    setTimeout(() => chart.resize(), 50);
+}
+
+function updatePanForMode(chart, fullscreen) {
+    if (!chart.options.plugins.zoom) return;
+    // On touch devices: pan only in fullscreen. On desktop: always pan.
+    const enablePan = !isTouchDevice() || fullscreen;
+    chart.options.plugins.zoom.pan.enabled = enablePan;
+    chart.update('none');
+}
+
+// ESC or back to close fullscreen chart
+document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+        const fs = document.querySelector('.chart-card.fullscreen');
+        if (fs) toggleFullscreen(fs.id);
+    }
+});
+
+// ------------------------------------------------------------------
+// Pad chart data to full 24 h (00:00 – 23:55, 5-min intervals)
+// ------------------------------------------------------------------
+
+function padDataTo24h(data) {
+    const srcLabels = data.timeLabels || [];
+    if (srcLabels.length === 0) return data;
+
+    // Detect interval from data (default 5 min)
+    let intervalMin = 5;
+    if (srcLabels.length >= 2) {
+        const t0 = timeToMinutes(srcLabels[0]);
+        const t1 = timeToMinutes(srcLabels[1]);
+        if (t1 > t0) intervalMin = t1 - t0;
+    }
+
+    // Build full 24 h label set
+    const fullLabels = [];
+    for (let m = 0; m < 1440; m += intervalMin) {
+        fullLabels.push(minutesToTime(m));
+    }
+
+    // Build a lookup: "HH:MM" → index in source
+    const srcIndex = {};
+    srcLabels.forEach((lbl, i) => { srcIndex[lbl] = i; });
+
+    // Data keys to pad (all arrays with same length as timeLabels)
+    const arrayKeys = Object.keys(data).filter(
+        k => k !== 'timeLabels' && k !== 'pvInputs' && Array.isArray(data[k]) && data[k].length === srcLabels.length
+    );
+
+    // Build padded arrays
+    const padded = { timeLabels: fullLabels, pvInputs: data.pvInputs };
+    for (const key of arrayKeys) {
+        padded[key] = fullLabels.map(lbl => {
+            const idx = srcIndex[lbl];
+            return idx !== undefined ? data[key][idx] : null;
+        });
+    }
+    return padded;
+}
+
+function timeToMinutes(hhmm) {
+    const parts = hhmm.split(':');
+    return parseInt(parts[0], 10) * 60 + parseInt(parts[1], 10);
+}
+
+function minutesToTime(m) {
+    const hh = String(Math.floor(m / 60)).padStart(2, '0');
+    const mm = String(m % 60).padStart(2, '0');
+    return `${hh}:${mm}`;
 }
 
 // ------------------------------------------------------------------
@@ -258,8 +386,11 @@ async function fetchDayChart() {
 
 function renderEnergyCharts(data) {
     const showPv = document.getElementById('chkShowPvModules').checked;
-    const labels = data.timeLabels || [];
+    const padded = padDataTo24h(data);
+    const labels = padded.timeLabels || [];
     const date = document.getElementById('selectedDate').value || todayStr();
+    // Use padded data for all series lookups
+    data = padded;
 
     // -- Main chart datasets --
     const datasets = [];
@@ -276,6 +407,7 @@ function renderEnergyCharts(data) {
             borderWidth: 1,
             pointRadius: 0,
             order: 10,
+            spanGaps: false,
         });
     }
 
@@ -291,6 +423,7 @@ function renderEnergyCharts(data) {
                     borderWidth: 1.5,
                     pointRadius: 2,
                     fill: false,
+                    spanGaps: false,
                 });
             }
         }
@@ -304,6 +437,7 @@ function renderEnergyCharts(data) {
                 borderWidth: 1.5,
                 pointRadius: 2,
                 fill: false,
+                spanGaps: false,
             });
         }
     }
@@ -317,6 +451,7 @@ function renderEnergyCharts(data) {
             borderWidth: 1.5,
             pointRadius: 2,
             fill: false,
+            spanGaps: false,
         });
     }
 
@@ -332,15 +467,17 @@ function renderEnergyCharts(data) {
 
     // -- Consumption chart --
     const conDatasets = [];
-    if (data.totalHouseholdLoad) {
+    // Pad consumption data too
+    if (padded.totalHouseholdLoad) {
         conDatasets.push({
             label: 'Verbrauch (W)',
-            data: data.totalHouseholdLoad,
+            data: padded.totalHouseholdLoad,
             borderColor: SERIES_COLORS.totalHouseholdLoad,
             backgroundColor: SERIES_COLORS.totalHouseholdLoad,
             borderWidth: 1.5,
             pointRadius: 2,
             fill: false,
+            spanGaps: false,
         });
     }
     consumptionChart.data.labels = labels;
@@ -403,7 +540,7 @@ function hidePanelFilter() {
 
 function refreshPanelChart() {
     if (!lastChartData || !lastPanelMode) return;
-    const data = lastChartData;
+    const data = padDataTo24h(lastChartData);
     const date = document.getElementById('selectedDate').value || todayStr();
 
     const mode = document.querySelector('input[name="panelMode"]:checked')?.value || 'power';
