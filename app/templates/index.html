@@ -7,7 +7,7 @@
     <link rel="stylesheet" href="/static/css/style.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8/hammer.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.2.0/dist/chartjs-plugin-zoom.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2/dist/chartjs-plugin-zoom.min.js"></script>
 </head>
 <body>
 
@@ -144,7 +144,7 @@
         <div class="chart-toolbar">
             <button class="chart-btn" onclick="zoomChart(mainChart, 'in')" title="Zoom +">+</button>
             <button class="chart-btn" onclick="zoomChart(mainChart, 'out')" title="Zoom −">−</button>
-            <button class="chart-btn" onclick="mainChart.resetZoom()" title="Reset">↺ 24h</button>
+            <button class="chart-btn" onclick="resetChartZoom(mainChart)" title="Reset">↺ 24h</button>
             <button class="chart-btn" onclick="toggleFullscreen('chartMainCard')" title="Vollbild">⛶</button>
             <span class="chart-hint chart-hint-desktop">Mausrad = Zoom · Ziehen = Verschieben</span>
             <span class="chart-hint chart-hint-mobile">Vollbild für Touch-Zoom</span>
@@ -155,7 +155,7 @@
         <div class="chart-toolbar">
             <button class="chart-btn" onclick="zoomChart(consumptionChart, 'in')" title="Zoom +">+</button>
             <button class="chart-btn" onclick="zoomChart(consumptionChart, 'out')" title="Zoom −">−</button>
-            <button class="chart-btn" onclick="consumptionChart.resetZoom()" title="Reset">↺ 24h</button>
+            <button class="chart-btn" onclick="resetChartZoom(consumptionChart)" title="Reset">↺ 24h</button>
             <button class="chart-btn" onclick="toggleFullscreen('chartConsumptionCard')" title="Vollbild">⛶</button>
         </div>
         <canvas id="chartConsumption"></canvas>

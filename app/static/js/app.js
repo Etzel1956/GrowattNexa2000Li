@@ -79,6 +79,14 @@ function switchTab(name) {
 document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('selectedDate').value = todayStr();
 
+    // Register zoom plugin explicitly (auto-register fails in some setups)
+    if (typeof ChartZoom !== 'undefined') {
+        Chart.register(ChartZoom);
+        console.log('chartjs-plugin-zoom registered OK');
+    } else {
+        console.warn('chartjs-plugin-zoom NOT loaded – zoom/pan disabled');
+    }
+
     // Init Chart.js – Live charts
     mainChart = new Chart(document.getElementById('chartMain'), {
         type: 'line',
@@ -152,10 +160,17 @@ function chartOptions(yLabel, dualAxis) {
 
 // Zoom helper for toolbar buttons
 function zoomChart(chart, direction) {
-    if (direction === 'in') {
-        chart.zoom(1.4);
-    } else {
-        chart.zoom(0.7);
+    if (typeof chart.zoom !== 'function') {
+        console.warn('Zoom plugin not available on chart');
+        return;
+    }
+    const factor = direction === 'in' ? 1.5 : 0.667;
+    chart.zoom({ x: factor });
+}
+
+function resetChartZoom(chart) {
+    if (typeof chart.resetZoom === 'function') {
+        chart.resetZoom();
     }
 }
 
