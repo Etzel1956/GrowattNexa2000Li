@@ -8,6 +8,7 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, Query, Request
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.base import BaseHTTPMiddleware
 from fastapi.templating import Jinja2Templates
 
 from .growatt_api import GrowattApi
@@ -60,6 +61,17 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Growatt Nexa 2000 Li", lifespan=lifespan)
 
+
+class NoCacheStaticMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request, call_next):
+        response = await call_next(request)
+        if request.url.path.startswith("/static/"):
+            response.headers["Cache-Control"] = "no-cache, must-revalidate"
+        return response
+
+
+app.add_middleware(NoCacheStaticMiddleware)
+
 BASE_DIR = Path(__file__).resolve().parent
 app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 templates = Jinja2Templates(directory=BASE_DIR / "templates")
@@ -77,6 +89,7 @@ async def index(request: Request):
         "default_pass": os.getenv("GROWATT_PASSWORD", ""),
         "version": APP_VERSION,
         "build": APP_BUILD,
+        "app_version": APP_BUILD.replace(" ", "_").replace(":", ""),
     })
 
 
