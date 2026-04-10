@@ -103,6 +103,9 @@ document.addEventListener('DOMContentLoaded', () => {
         }, { passive: false });
     });
 
+    // Touch gestures for mobile/tablet
+    ['chartMain', 'chartConsumption'].forEach(id => initTouchGestures(id));
+
     // Init year/month selectors
     initHistorySelectors();
 
@@ -230,6 +233,82 @@ function onNewChartData(totalLabels, date) {
 }
 
 // ------------------------------------------------------------------
+// Touch gestures – swipe to pan, pinch to zoom
+// ------------------------------------------------------------------
+
+const touch = { active: false, startX: 0, startY: 0, lastDist: 0, mode: '' };
+
+function initTouchGestures(canvasId) {
+    const el = document.getElementById(canvasId);
+
+    el.addEventListener('touchstart', (e) => {
+        if (chartView.total === 0) return;
+        if (e.touches.length === 1) {
+            touch.mode = 'pan';
+            touch.startX = e.touches[0].clientX;
+            touch.startY = e.touches[0].clientY;
+            touch.active = true;
+        } else if (e.touches.length === 2) {
+            touch.mode = 'pinch';
+            touch.lastDist = Math.hypot(
+                e.touches[1].clientX - e.touches[0].clientX,
+                e.touches[1].clientY - e.touches[0].clientY
+            );
+            touch.active = true;
+            e.preventDefault();
+        }
+    }, { passive: false });
+
+    el.addEventListener('touchmove', (e) => {
+        if (!touch.active || chartView.total === 0) return;
+
+        if (touch.mode === 'pan' && e.touches.length === 1) {
+            const dx = e.touches[0].clientX - touch.startX;
+            const dy = e.touches[0].clientY - touch.startY;
+            // Only pan horizontally if movement is mostly horizontal
+            if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 15) {
+                e.preventDefault();
+                touch.startX = e.touches[0].clientX;
+                // Swipe right = pan left (earlier), swipe left = pan right (later)
+                const visible = chartView.end - chartView.start;
+                const step = Math.max(1, Math.round(visible * 0.08));
+                if (dx > 0) {
+                    const shift = Math.min(step, chartView.start);
+                    chartView.start -= shift;
+                    chartView.end -= shift;
+                } else {
+                    const shift = Math.min(step, chartView.total - 1 - chartView.end);
+                    chartView.start += shift;
+                    chartView.end += shift;
+                }
+                syncCharts();
+            }
+        } else if (touch.mode === 'pinch' && e.touches.length === 2) {
+            e.preventDefault();
+            const dist = Math.hypot(
+                e.touches[1].clientX - e.touches[0].clientX,
+                e.touches[1].clientY - e.touches[0].clientY
+            );
+            const diff = dist - touch.lastDist;
+            if (Math.abs(diff) > 10) {
+                touch.lastDist = dist;
+                zoomCharts(diff > 0 ? 'in' : 'out');
+            }
+        }
+    }, { passive: false });
+
+    el.addEventListener('touchend', () => {
+        touch.active = false;
+        touch.mode = '';
+    });
+
+    el.addEventListener('touchcancel', () => {
+        touch.active = false;
+        touch.mode = '';
+    });
+}
+
+// ------------------------------------------------------------------
 // Fullscreen chart mode (especially useful on mobile)
 // ------------------------------------------------------------------
 
@@ -353,10 +432,14 @@ async function toggleConnect() {
     if (result.logs) result.logs.forEach(l => log(l));
     updateConnectionUI();
 
-    // Auto-load live data + chart
+    // Auto-load live data + restore previous view mode
     await fetchLiveStatus();
     await fetchEnergyTotals();
-    await fetchDayChart();
+    if (lastPanelMode) {
+        await fetchPanelDetails();
+    } else {
+        await fetchDayChart();
+    }
 }
 
 function updateConnectionUI() {
@@ -567,6 +650,11 @@ async function fetchPanelDetails() {
     const date = document.getElementById('selectedDate').value || todayStr();
     log(`Lade Panel-Details (${date})...`);
 
+    // Remember current checkbox state before rebuilding
+    const prevChecked = [...document.querySelectorAll('.pvChk')].map(c => ({
+        value: parseInt(c.value), checked: c.checked
+    }));
+
     const data = await apiCall(`/api/panel-details?date=${date}`);
     if (!data || data.error || !data.pvInputs || data.pvInputs.length === 0) {
         log('Keine Panel-Detail-Daten.');
@@ -574,6 +662,15 @@ async function fetchPanelDetails() {
     }
     lastChartData = data;
     buildPanelFilter(data.pvInputs);
+
+    // Restore previous checkbox state if same inputs exist
+    if (prevChecked.length > 0) {
+        document.querySelectorAll('.pvChk').forEach(chk => {
+            const prev = prevChecked.find(p => p.value === parseInt(chk.value));
+            if (prev) chk.checked = prev.checked;
+        });
+    }
+
     showPanelFilter();
     refreshPanelChart();
     log('Panel-Details geladen.');
@@ -688,6 +785,16 @@ function refreshPanelChart() {
     consumptionChart.update();
 }
 
+// Refresh panel data without resetting filter checkboxes / mode
+async function refreshPanelDataKeepState() {
+    if (!connected) return;
+    const date = document.getElementById('selectedDate').value || todayStr();
+    const data = await apiCall(`/api/panel-details?date=${date}`);
+    if (!data || data.error || !data.pvInputs || data.pvInputs.length === 0) return;
+    lastChartData = data;
+    refreshPanelChart();
+}
+
 // ------------------------------------------------------------------
 // Auto-Refresh
 // ------------------------------------------------------------------
@@ -707,7 +814,9 @@ function startAutoRefresh() {
         if (connected) {
             await fetchLiveStatus();
             await fetchEnergyTotals();
-            if (!lastPanelMode) {
+            if (lastPanelMode) {
+                await refreshPanelDataKeepState();
+            } else {
                 await fetchDayChart();
             }
         }
