@@ -202,9 +202,12 @@ function applyViewToOptions(chart) {
     if (v.start <= 0 && v.end >= v.total - 1) {
         delete chart.options.scales.x.min;
         delete chart.options.scales.x.max;
+        console.log('[ZOOM] applyView: FULL range (no min/max)');
     } else {
         chart.options.scales.x.min = labels[Math.max(0, v.start)];
         chart.options.scales.x.max = labels[Math.min(labels.length - 1, v.end)];
+        console.log('[ZOOM] applyView:', chart.options.scales.x.min, '→', chart.options.scales.x.max,
+                    `(idx ${v.start}-${v.end} of ${v.total})`);
     }
 }
 
@@ -277,7 +280,14 @@ function onNewChartData(totalLabels, date, dataStart, dataEnd) {
     if (dataStart != null) chartView._dataStart = dataStart;
     if (dataEnd != null)   chartView._dataEnd = dataEnd;
 
-    if (chartView.date === date) {
+    const sameDate = (chartView.date === date);
+    console.log('[ZOOM] onNewChartData', {
+        sameDate, oldDate: chartView.date, newDate: date,
+        totalLabels, dataStart, dataEnd,
+        before: { start: chartView.start, end: chartView.end, total: chartView.total }
+    });
+
+    if (sameDate) {
         // Same date (auto-refresh) – keep zoom, just update total
         chartView.total = totalLabels;
         chartView.end = Math.min(chartView.end, totalLabels - 1);
@@ -295,8 +305,11 @@ function onNewChartData(totalLabels, date, dataStart, dataEnd) {
             chartView.end = Math.max(0, totalLabels - 1);
         }
     }
+
+    console.log('[ZOOM] after:', { start: chartView.start, end: chartView.end, total: chartView.total });
     saveViewState();
 }
+
 
 // ------------------------------------------------------------------
 // Touch gestures – swipe to pan, pinch to zoom
