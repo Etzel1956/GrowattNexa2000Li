@@ -194,28 +194,34 @@ function chartOptions(yLabel, dualAxis) {
 // Synchronized zoom / pan – both charts share one time window
 // ------------------------------------------------------------------
 
-// Apply current zoom to a single chart's options (call BEFORE chart.update)
-function applyViewToOptions(chart) {
+// Apply current zoom by trimming labels/data arrays directly
+function applyZoomToChart(chart) {
     const v = chartView;
-    if (v.total === 0 || !chart.data.labels.length) return;
-    const labels = chart.data.labels;
+    if (v.total === 0) return;
+
     if (v.start <= 0 && v.end >= v.total - 1) {
-        delete chart.options.scales.x.min;
-        delete chart.options.scales.x.max;
-        console.log('[ZOOM] applyView: FULL range (no min/max)');
-    } else {
-        chart.options.scales.x.min = labels[Math.max(0, v.start)];
-        chart.options.scales.x.max = labels[Math.min(labels.length - 1, v.end)];
-        console.log('[ZOOM] applyView:', chart.options.scales.x.min, '→', chart.options.scales.x.max,
-                    `(idx ${v.start}-${v.end} of ${v.total})`);
+        // Full range – no trimming needed, data is already complete
+        console.log('[ZOOM] applyZoom: FULL range');
+        return;
     }
+
+    const s = Math.max(0, v.start);
+    const e = Math.min(v.total - 1, v.end);
+    chart.data.labels = chart.data._fullLabels.slice(s, e + 1);
+    chart.data.datasets.forEach(ds => {
+        if (ds._fullData) {
+            ds.data = ds._fullData.slice(s, e + 1);
+        }
+    });
+    console.log('[ZOOM] applyZoom:', chart.data.labels[0], '→', chart.data.labels[chart.data.labels.length - 1],
+                `(idx ${s}-${e} of ${v.total})`);
 }
 
 // Apply zoom to both charts and redraw
 function syncCharts() {
     [mainChart, consumptionChart].forEach(chart => {
-        if (!chart || !chart.data.labels.length) return;
-        applyViewToOptions(chart);
+        if (!chart || !chart.data._fullLabels || !chart.data._fullLabels.length) return;
+        applyZoomToChart(chart);
         chart.update('none');
     });
 }
@@ -681,7 +687,9 @@ function renderEnergyCharts(data) {
     onNewChartData(labels.length, date, padded._dataStart, padded._dataEnd);
 
     // -- Main chart --
+    mainChart.data._fullLabels = labels;
     mainChart.data.labels = labels;
+    datasets.forEach(ds => { ds._fullData = [...ds.data]; });
     mainChart.data.datasets = datasets;
     mainChart.options = chartOptions('W', true);
     mainChart.options.plugins.title = {
@@ -689,8 +697,8 @@ function renderEnergyCharts(data) {
         text: (showPv ? 'PV-Module' : 'PV') + ` / Netz / SOC - ${date}`,
         font: { size: 14, weight: 'bold' },
     };
-    applyViewToOptions(mainChart);   // zoom BEFORE update
-    mainChart.update();
+    applyZoomToChart(mainChart);
+    mainChart.update('none');
 
     // -- Consumption chart --
     const conDatasets = [];
@@ -706,7 +714,9 @@ function renderEnergyCharts(data) {
             spanGaps: false,
         });
     }
+    consumptionChart.data._fullLabels = labels;
     consumptionChart.data.labels = labels;
+    conDatasets.forEach(ds => { ds._fullData = [...ds.data]; });
     consumptionChart.data.datasets = conDatasets;
     consumptionChart.options = chartOptions('W', false);
     consumptionChart.options.plugins.title = {
@@ -714,8 +724,8 @@ function renderEnergyCharts(data) {
         text: `Verbrauch im Haus - ${date}`,
         font: { size: 14, weight: 'bold' },
     };
-    applyViewToOptions(consumptionChart);   // zoom BEFORE update
-    consumptionChart.update();
+    applyZoomToChart(consumptionChart);
+    consumptionChart.update('none');
 }
 
 function onPvModulesToggle() {
@@ -860,14 +870,17 @@ function refreshPanelChart() {
     }
 
     onNewChartData(labels.length, date, data._dataStart, data._dataEnd);
+    mainChart.data._fullLabels = labels;
     mainChart.data.labels = labels;
+    datasets.forEach(ds => { ds._fullData = [...ds.data]; });
     mainChart.data.datasets = datasets;
-    applyViewToOptions(mainChart);
-    mainChart.update();
+    applyZoomToChart(mainChart);
+    mainChart.update('none');
 
+    consumptionChart.data._fullLabels = [];
     consumptionChart.data.labels = [];
     consumptionChart.data.datasets = [];
-    consumptionChart.update();
+    consumptionChart.update('none');
 }
 
 // Refresh panel data without resetting filter checkboxes / mode
