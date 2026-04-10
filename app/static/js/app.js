@@ -13,7 +13,43 @@ let consumptionChart = null;
 let historyChart = null;
 
 // Shared zoom/pan view state – both charts show the same time window
-const chartView = { start: 0, end: 0, total: 0, date: null };
+const chartView = { start: 0, end: 0, total: 0, date: null, _dataStart: 0, _dataEnd: 0 };
+
+// ------------------------------------------------------------------
+// State persistence (survives F5 / browser refresh)
+// ------------------------------------------------------------------
+
+function saveViewState() {
+    try {
+        sessionStorage.setItem('growatt_viewState', JSON.stringify({
+            chartView: { start: chartView.start, end: chartView.end,
+                         total: chartView.total, date: chartView.date,
+                         _dataStart: chartView._dataStart, _dataEnd: chartView._dataEnd },
+            lastPanelMode,
+            panelMode: document.querySelector('input[name="panelMode"]:checked')?.value || 'power',
+            selectedDate: document.getElementById('selectedDate')?.value || '',
+        }));
+    } catch (e) { /* ignore storage errors */ }
+}
+
+function loadViewState() {
+    try {
+        const raw = sessionStorage.getItem('growatt_viewState');
+        if (!raw) return false;
+        const s = JSON.parse(raw);
+        if (s.chartView) Object.assign(chartView, s.chartView);
+        if (s.lastPanelMode != null) lastPanelMode = s.lastPanelMode;
+        if (s.panelMode) {
+            const radio = document.querySelector(`input[name="panelMode"][value="${s.panelMode}"]`);
+            if (radio) radio.checked = true;
+        }
+        if (s.selectedDate) {
+            const el = document.getElementById('selectedDate');
+            if (el) el.value = s.selectedDate;
+        }
+        return true;
+    } catch (e) { return false; }
+}
 
 // ------------------------------------------------------------------
 // Helpers
@@ -80,7 +116,11 @@ function switchTab(name) {
 // ------------------------------------------------------------------
 
 document.addEventListener('DOMContentLoaded', () => {
-    document.getElementById('selectedDate').value = todayStr();
+    // Restore persisted state first (selected date, zoom, panel mode)
+    const hasState = loadViewState();
+    if (!hasState) {
+        document.getElementById('selectedDate').value = todayStr();
+    }
 
     // Init Chart.js – Live charts
     mainChart = new Chart(document.getElementById('chartMain'), {
@@ -190,6 +230,7 @@ function zoomCharts(direction) {
         v.start = Math.max(0, v.start - delta);
         v.end   = Math.min(v.total - 1, v.end + delta);
     }
+    saveViewState();
     syncCharts();
 }
 
@@ -207,29 +248,54 @@ function panCharts(direction) {
         v.start += shift;
         v.end   += shift;
     }
+    saveViewState();
     syncCharts();
 }
 
 function resetChartZoom() {
-    chartView.start = 0;
-    chartView.end = Math.max(0, chartView.total - 1);
+    // Toggle: if already at data range → show full 24h, otherwise → fit to data
+    const ds = chartView._dataStart || 0;
+    const de = chartView._dataEnd || chartView.total - 1;
+    const atDataRange = (chartView.start === Math.max(0, ds - 2) &&
+                         chartView.end === Math.min(chartView.total - 1, de + 2));
+    if (atDataRange) {
+        // Show full 24h
+        chartView.start = 0;
+        chartView.end = Math.max(0, chartView.total - 1);
+    } else {
+        // Fit to data range
+        chartView.start = Math.max(0, ds - 2);
+        chartView.end = Math.min(chartView.total - 1, de + 2);
+    }
+    saveViewState();
     syncCharts();
 }
 
 // Called after new data is loaded; resets zoom only on date change
-function onNewChartData(totalLabels, date) {
+function onNewChartData(totalLabels, date, dataStart, dataEnd) {
+    // Always track actual data range for reset button
+    if (dataStart != null) chartView._dataStart = dataStart;
+    if (dataEnd != null)   chartView._dataEnd = dataEnd;
+
     if (chartView.date === date) {
         // Same date (auto-refresh) – keep zoom, just update total
         chartView.total = totalLabels;
         chartView.end = Math.min(chartView.end, totalLabels - 1);
         chartView.start = Math.min(chartView.start, chartView.end);
     } else {
-        // New date or first load – full range
+        // New date or first load – zoom to actual data range (not full 24h)
         chartView.date = date;
         chartView.total = totalLabels;
-        chartView.start = 0;
-        chartView.end = Math.max(0, totalLabels - 1);
+        if (dataStart != null && dataEnd != null) {
+            // Add a small margin (2 data points) around data for breathing room
+            chartView.start = Math.max(0, dataStart - 2);
+            chartView.end = Math.min(totalLabels - 1, dataEnd + 2);
+        } else {
+            chartView.start = 0;
+            chartView.end = Math.max(0, totalLabels - 1);
+        }
     }
+    saveViewState();
 }
 
 // ------------------------------------------------------------------
@@ -281,6 +347,7 @@ function initTouchGestures(canvasId) {
                     chartView.start += shift;
                     chartView.end += shift;
                 }
+                saveViewState();
                 syncCharts();
             }
         } else if (touch.mode === 'pinch' && e.touches.length === 2) {
@@ -379,6 +446,9 @@ function padDataTo24h(data) {
     for (const key of arrayKeys) {
         padded[key] = [...nullsBefore, ...data[key], ...nullsAfter];
     }
+    // Store indices of actual data range within the padded array
+    padded._dataStart = before.length;
+    padded._dataEnd   = before.length + srcLabels.length - 1;
     return padded;
 }
 
@@ -509,6 +579,7 @@ async function fetchDayChart() {
     if (!connected) return;
     hidePanelFilter();
     lastPanelMode = false;
+    saveViewState();
     const date = document.getElementById('selectedDate').value || todayStr();
     log(`Lade Tages-Chart (${date})...`);
 
@@ -593,8 +664,8 @@ function renderEnergyCharts(data) {
         });
     }
 
-    // Update zoom state (resets only on date change)
-    onNewChartData(labels.length, date);
+    // Update zoom state (resets only on date change, zooms to data range)
+    onNewChartData(labels.length, date, padded._dataStart, padded._dataEnd);
 
     // -- Main chart --
     mainChart.data.labels = labels;
@@ -647,6 +718,7 @@ function onPvModulesToggle() {
 async function fetchPanelDetails() {
     if (!connected) return;
     lastPanelMode = true;
+    saveViewState();
     const date = document.getElementById('selectedDate').value || todayStr();
     log(`Lade Panel-Details (${date})...`);
 
@@ -774,7 +846,7 @@ function refreshPanelChart() {
         };
     }
 
-    onNewChartData(labels.length, date);
+    onNewChartData(labels.length, date, data._dataStart, data._dataEnd);
     mainChart.data.labels = labels;
     mainChart.data.datasets = datasets;
     applyViewToOptions(mainChart);
