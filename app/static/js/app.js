@@ -12,8 +12,13 @@ let mainChart = null;
 let consumptionChart = null;
 let historyChart = null;
 
-// Shared zoom/pan view state – both charts show the same time window
-const chartView = { start: 0, end: 0, total: 0, date: null, _dataStart: 0, _dataEnd: 0 };
+// Shared zoom/pan view state – both charts show the same time window.
+// Timestamps in ms since epoch. xMin/xMax = current visible window,
+// dataXMin/dataXMax = range where actual (non-null) data exists.
+const chartView = { xMin: null, xMax: null, date: null, dataXMin: null, dataXMax: null };
+
+// Sync guard to prevent infinite zoom-callback loops between the two charts
+let _syncingZoom = false;
 
 // ------------------------------------------------------------------
 // State persistence (survives F5 / browser refresh)
@@ -22,9 +27,10 @@ const chartView = { start: 0, end: 0, total: 0, date: null, _dataStart: 0, _data
 function saveViewState() {
     try {
         sessionStorage.setItem('growatt_viewState', JSON.stringify({
-            chartView: { start: chartView.start, end: chartView.end,
-                         total: chartView.total, date: chartView.date,
-                         _dataStart: chartView._dataStart, _dataEnd: chartView._dataEnd },
+            chartView: {
+                xMin: chartView.xMin, xMax: chartView.xMax, date: chartView.date,
+                dataXMin: chartView.dataXMin, dataXMax: chartView.dataXMax,
+            },
             lastPanelMode,
             panelMode: document.querySelector('input[name="panelMode"]:checked')?.value || 'power',
             selectedDate: document.getElementById('selectedDate')?.value || '',
@@ -37,7 +43,15 @@ function loadViewState() {
         const raw = sessionStorage.getItem('growatt_viewState');
         if (!raw) return false;
         const s = JSON.parse(raw);
-        if (s.chartView) Object.assign(chartView, s.chartView);
+        // Only adopt state from the new (timestamp-based) schema.
+        // Pre-refactor state used {start,end,total} indices and is incompatible.
+        if (s.chartView && 'xMin' in s.chartView && 'xMax' in s.chartView) {
+            chartView.xMin     = s.chartView.xMin;
+            chartView.xMax     = s.chartView.xMax;
+            chartView.date     = s.chartView.date;
+            chartView.dataXMin = s.chartView.dataXMin;
+            chartView.dataXMax = s.chartView.dataXMax;
+        }
         if (s.lastPanelMode != null) lastPanelMode = s.lastPanelMode;
         if (s.panelMode) {
             const radio = document.querySelector(`input[name="panelMode"][value="${s.panelMode}"]`);
@@ -134,17 +148,8 @@ document.addEventListener('DOMContentLoaded', () => {
         options: chartOptions('W', false),
     });
 
-    // Synchronized mouse-wheel zoom on both chart canvases
-    ['chartMain', 'chartConsumption'].forEach(id => {
-        document.getElementById(id).addEventListener('wheel', (e) => {
-            if (chartView.total === 0) return;
-            e.preventDefault();
-            zoomCharts(e.deltaY > 0 ? 'out' : 'in');
-        }, { passive: false });
-    });
-
-    // Touch gestures for mobile/tablet
-    ['chartMain', 'chartConsumption'].forEach(id => initTouchGestures(id));
+    // Mouse wheel zoom, pinch, pan, and touch-drag are all handled by
+    // chartjs-plugin-zoom (see chartOptions). No manual listeners needed.
 
     // Init year/month selectors
     initHistorySelectors();
@@ -165,10 +170,40 @@ function chartOptions(yLabel, dualAxis) {
         interaction: { mode: 'index', intersect: false },
         plugins: {
             legend: { position: 'top', labels: { usePointStyle: true, pointStyle: 'circle' } },
-            tooltip: { mode: 'index', intersect: false },
+            tooltip: {
+                mode: 'index',
+                intersect: false,
+                callbacks: {
+                    title: (items) => {
+                        if (!items.length) return '';
+                        const d = new Date(items[0].parsed.x);
+                        return d.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
+                    },
+                },
+            },
+            zoom: {
+                pan: {
+                    enabled: true,
+                    mode: 'x',
+                    onPanComplete: onZoomOrPanComplete,
+                },
+                zoom: {
+                    wheel: { enabled: true, speed: 0.1 },
+                    pinch: { enabled: true },
+                    mode: 'x',
+                    onZoomComplete: onZoomOrPanComplete,
+                },
+            },
         },
         scales: {
             x: {
+                type: 'time',
+                time: {
+                    unit: 'hour',
+                    stepSize: 2,
+                    displayFormats: { hour: 'HH:mm', minute: 'HH:mm' },
+                    tooltipFormat: 'HH:mm',
+                },
                 ticks: { maxRotation: 45, autoSkip: true, maxTicksLimit: 18 },
                 grid: { color: '#eee' },
             },
@@ -191,207 +226,87 @@ function chartOptions(yLabel, dualAxis) {
 }
 
 // ------------------------------------------------------------------
-// Synchronized zoom / pan – both charts share one time window
+// Synchronized zoom / pan – both charts share one time window.
+// Driven by chartjs-plugin-zoom: we only keep the current {xMin,xMax}
+// in chartView, mirror it to the other chart, and persist it.
 // ------------------------------------------------------------------
 
-// Apply current zoom by trimming labels/data arrays directly
-function applyZoomToChart(chart) {
-    const v = chartView;
-    if (v.total === 0) return;
-
-    if (v.start <= 0 && v.end >= v.total - 1) {
-        // Full range – no trimming needed, data is already complete
-        console.log('[ZOOM] applyZoom: FULL range');
-        return;
-    }
-
-    const s = Math.max(0, v.start);
-    const e = Math.min(v.total - 1, v.end);
-    chart.data.labels = chart.data._fullLabels.slice(s, e + 1);
-    chart.data.datasets.forEach(ds => {
-        if (ds._fullData) {
-            ds.data = ds._fullData.slice(s, e + 1);
-        }
-    });
-    console.log('[ZOOM] applyZoom:', chart.data.labels[0], '→', chart.data.labels[chart.data.labels.length - 1],
-                `(idx ${s}-${e} of ${v.total})`);
-}
-
-// Apply zoom to both charts and redraw
-function syncCharts() {
-    [mainChart, consumptionChart].forEach(chart => {
-        if (!chart || !chart.data._fullLabels || !chart.data._fullLabels.length) return;
-        applyZoomToChart(chart);
-        chart.update('none');
-    });
-}
-
-function zoomCharts(direction) {
-    const v = chartView;
-    if (v.total === 0) return;
-    const visible = v.end - v.start;
-    const delta = Math.max(1, Math.round(visible * 0.2));
-    if (direction === 'in') {
-        if (visible <= 12) return;
-        v.start = Math.min(v.start + delta, v.end - 12);
-        v.end   = Math.max(v.end - delta, v.start + 12);
-    } else {
-        v.start = Math.max(0, v.start - delta);
-        v.end   = Math.min(v.total - 1, v.end + delta);
-    }
+// Callback bound into the plugin options for both charts
+function onZoomOrPanComplete({ chart }) {
+    if (_syncingZoom) return;
+    const xScale = chart.scales.x;
+    if (!xScale) return;
+    chartView.xMin = xScale.min;
+    chartView.xMax = xScale.max;
     saveViewState();
-    syncCharts();
+    mirrorZoomToOther(chart);
 }
 
-function panCharts(direction) {
-    const v = chartView;
-    if (v.total === 0) return;
-    const visible = v.end - v.start;
-    const step = Math.max(1, Math.round(visible * 0.25));
-    if (direction === 'left') {
-        const shift = Math.min(step, v.start);
-        v.start -= shift;
-        v.end   -= shift;
-    } else {
-        const shift = Math.min(step, v.total - 1 - v.end);
-        v.start += shift;
-        v.end   += shift;
+// Apply the current chartView window to a single chart (used after data reload)
+function applyViewToChart(chart) {
+    if (!chart || chartView.xMin == null || chartView.xMax == null) return;
+    _syncingZoom = true;
+    try {
+        chart.zoomScale('x', { min: chartView.xMin, max: chartView.xMax }, 'none');
+    } finally {
+        _syncingZoom = false;
     }
-    saveViewState();
-    syncCharts();
 }
 
+// Mirror the source chart's x-window onto the other chart
+function mirrorZoomToOther(sourceChart) {
+    const other = sourceChart === mainChart ? consumptionChart : mainChart;
+    if (!other || !other.data || !other.data.datasets || other.data.datasets.length === 0) return;
+    _syncingZoom = true;
+    try {
+        other.zoomScale('x', { min: chartView.xMin, max: chartView.xMax }, 'none');
+    } finally {
+        _syncingZoom = false;
+    }
+}
+
+// Toggle: fit to data  <->  full 24h
 function resetChartZoom() {
-    // Toggle: if already at data range → show full 24h, otherwise → fit to data
-    const ds = chartView._dataStart || 0;
-    const de = chartView._dataEnd || chartView.total - 1;
-    const atDataRange = (chartView.start === Math.max(0, ds - 2) &&
-                         chartView.end === Math.min(chartView.total - 1, de + 2));
-    if (atDataRange) {
-        // Show full 24h
-        chartView.start = 0;
-        chartView.end = Math.max(0, chartView.total - 1);
+    if (chartView.dataXMin == null || chartView.dataXMax == null) return;
+    // Build "fit to data" window with a small margin (~10 min)
+    const marginMs = 10 * 60 * 1000;
+    const fitMin = chartView.dataXMin - marginMs;
+    const fitMax = chartView.dataXMax + marginMs;
+    const atFit = (Math.abs(chartView.xMin - fitMin) < 1000 &&
+                   Math.abs(chartView.xMax - fitMax) < 1000);
+    if (atFit) {
+        // Show full 24h by resetting zoom on both charts
+        [mainChart, consumptionChart].forEach(c => {
+            if (c && c.data.datasets.length) c.resetZoom('none');
+        });
+        const xScale = mainChart && mainChart.scales.x;
+        if (xScale) { chartView.xMin = xScale.min; chartView.xMax = xScale.max; }
     } else {
-        // Fit to data range
-        chartView.start = Math.max(0, ds - 2);
-        chartView.end = Math.min(chartView.total - 1, de + 2);
+        chartView.xMin = fitMin;
+        chartView.xMax = fitMax;
+        [mainChart, consumptionChart].forEach(applyViewToChart);
     }
     saveViewState();
-    syncCharts();
 }
 
-// Called after new data is loaded; resets zoom only on date change
-function onNewChartData(totalLabels, date, dataStart, dataEnd) {
-    // Always track actual data range for reset button
-    if (dataStart != null) chartView._dataStart = dataStart;
-    if (dataEnd != null)   chartView._dataEnd = dataEnd;
-
+// Called after new data is loaded. Preserves window on same-date refresh,
+// fits to data range on a new date / first load.
+function onNewChartData(date, dataXMin, dataXMax) {
+    if (dataXMin != null) chartView.dataXMin = dataXMin;
+    if (dataXMax != null) chartView.dataXMax = dataXMax;
     const sameDate = (chartView.date === date);
-    console.log('[ZOOM] onNewChartData', {
-        sameDate, oldDate: chartView.date, newDate: date,
-        totalLabels, dataStart, dataEnd,
-        before: { start: chartView.start, end: chartView.end, total: chartView.total }
-    });
-
-    if (sameDate) {
-        // Same date (auto-refresh) – keep zoom, just update total
-        chartView.total = totalLabels;
-        chartView.end = Math.min(chartView.end, totalLabels - 1);
-        chartView.start = Math.min(chartView.start, chartView.end);
-    } else {
-        // New date or first load – zoom to actual data range (not full 24h)
+    if (!sameDate) {
         chartView.date = date;
-        chartView.total = totalLabels;
-        if (dataStart != null && dataEnd != null) {
-            // Add a small margin (2 data points) around data for breathing room
-            chartView.start = Math.max(0, dataStart - 2);
-            chartView.end = Math.min(totalLabels - 1, dataEnd + 2);
+        const marginMs = 10 * 60 * 1000;
+        if (dataXMin != null && dataXMax != null) {
+            chartView.xMin = dataXMin - marginMs;
+            chartView.xMax = dataXMax + marginMs;
         } else {
-            chartView.start = 0;
-            chartView.end = Math.max(0, totalLabels - 1);
+            chartView.xMin = null;
+            chartView.xMax = null;
         }
     }
-
-    console.log('[ZOOM] after:', { start: chartView.start, end: chartView.end, total: chartView.total });
     saveViewState();
-}
-
-
-// ------------------------------------------------------------------
-// Touch gestures – swipe to pan, pinch to zoom
-// ------------------------------------------------------------------
-
-const touch = { active: false, startX: 0, startY: 0, lastDist: 0, mode: '' };
-
-function initTouchGestures(canvasId) {
-    const el = document.getElementById(canvasId);
-
-    el.addEventListener('touchstart', (e) => {
-        if (chartView.total === 0) return;
-        if (e.touches.length === 1) {
-            touch.mode = 'pan';
-            touch.startX = e.touches[0].clientX;
-            touch.startY = e.touches[0].clientY;
-            touch.active = true;
-        } else if (e.touches.length === 2) {
-            touch.mode = 'pinch';
-            touch.lastDist = Math.hypot(
-                e.touches[1].clientX - e.touches[0].clientX,
-                e.touches[1].clientY - e.touches[0].clientY
-            );
-            touch.active = true;
-            e.preventDefault();
-        }
-    }, { passive: false });
-
-    el.addEventListener('touchmove', (e) => {
-        if (!touch.active || chartView.total === 0) return;
-
-        if (touch.mode === 'pan' && e.touches.length === 1) {
-            const dx = e.touches[0].clientX - touch.startX;
-            const dy = e.touches[0].clientY - touch.startY;
-            // Only pan horizontally if movement is mostly horizontal
-            if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 15) {
-                e.preventDefault();
-                touch.startX = e.touches[0].clientX;
-                // Swipe right = pan left (earlier), swipe left = pan right (later)
-                const visible = chartView.end - chartView.start;
-                const step = Math.max(1, Math.round(visible * 0.08));
-                if (dx > 0) {
-                    const shift = Math.min(step, chartView.start);
-                    chartView.start -= shift;
-                    chartView.end -= shift;
-                } else {
-                    const shift = Math.min(step, chartView.total - 1 - chartView.end);
-                    chartView.start += shift;
-                    chartView.end += shift;
-                }
-                saveViewState();
-                syncCharts();
-            }
-        } else if (touch.mode === 'pinch' && e.touches.length === 2) {
-            e.preventDefault();
-            const dist = Math.hypot(
-                e.touches[1].clientX - e.touches[0].clientX,
-                e.touches[1].clientY - e.touches[0].clientY
-            );
-            const diff = dist - touch.lastDist;
-            if (Math.abs(diff) > 10) {
-                touch.lastDist = dist;
-                zoomCharts(diff > 0 ? 'in' : 'out');
-            }
-        }
-    }, { passive: false });
-
-    el.addEventListener('touchend', () => {
-        touch.active = false;
-        touch.mode = '';
-    });
-
-    el.addEventListener('touchcancel', () => {
-        touch.active = false;
-        touch.mode = '';
-    });
 }
 
 // ------------------------------------------------------------------
@@ -426,7 +341,7 @@ document.addEventListener('keydown', (e) => {
 // empty markers before/after so the x-axis spans 00:00 – 23:55
 // ------------------------------------------------------------------
 
-function padDataTo24h(data) {
+function padDataTo24h(data, dateStr) {
     const srcLabels = data.timeLabels || [];
     if (srcLabels.length === 0) return data;
 
@@ -465,9 +380,13 @@ function padDataTo24h(data) {
     for (const key of arrayKeys) {
         padded[key] = [...nullsBefore, ...data[key], ...nullsAfter];
     }
-    // Store indices of actual data range within the padded array
-    padded._dataStart = before.length;
-    padded._dataEnd   = before.length + srcLabels.length - 1;
+    // Build Date-object labels for Chart.js time scale.
+    // Use the chart's selected date; fall back to today if missing.
+    const baseDate = dateStr || todayStr();
+    padded.dateLabels = fullLabels.map(hhmm => new Date(`${baseDate}T${hhmm}:00`));
+    // Timestamps (ms) of the first and last real (non-padded) data point
+    padded.dataXMin = padded.dateLabels[before.length].getTime();
+    padded.dataXMax = padded.dateLabels[before.length + srcLabels.length - 1].getTime();
     return padded;
 }
 
@@ -614,9 +533,9 @@ async function fetchDayChart() {
 
 function renderEnergyCharts(data) {
     const showPv = document.getElementById('chkShowPvModules').checked;
-    const padded = padDataTo24h(data);
-    const labels = padded.timeLabels || [];
     const date = document.getElementById('selectedDate').value || todayStr();
+    const padded = padDataTo24h(data, date);
+    const labels = padded.dateLabels || [];
     // Use padded data for all series lookups
     data = padded;
 
@@ -684,12 +603,10 @@ function renderEnergyCharts(data) {
     }
 
     // Update zoom state (resets only on date change, zooms to data range)
-    onNewChartData(labels.length, date, padded._dataStart, padded._dataEnd);
+    onNewChartData(date, padded.dataXMin, padded.dataXMax);
 
     // -- Main chart --
-    mainChart.data._fullLabels = labels;
     mainChart.data.labels = labels;
-    datasets.forEach(ds => { ds._fullData = [...ds.data]; });
     mainChart.data.datasets = datasets;
     mainChart.options = chartOptions('W', true);
     mainChart.options.plugins.title = {
@@ -697,8 +614,8 @@ function renderEnergyCharts(data) {
         text: (showPv ? 'PV-Module' : 'PV') + ` / Netz / SOC - ${date}`,
         font: { size: 14, weight: 'bold' },
     };
-    applyZoomToChart(mainChart);
     mainChart.update('none');
+    applyViewToChart(mainChart);
 
     // -- Consumption chart --
     const conDatasets = [];
@@ -714,9 +631,7 @@ function renderEnergyCharts(data) {
             spanGaps: false,
         });
     }
-    consumptionChart.data._fullLabels = labels;
     consumptionChart.data.labels = labels;
-    conDatasets.forEach(ds => { ds._fullData = [...ds.data]; });
     consumptionChart.data.datasets = conDatasets;
     consumptionChart.options = chartOptions('W', false);
     consumptionChart.options.plugins.title = {
@@ -724,8 +639,8 @@ function renderEnergyCharts(data) {
         text: `Verbrauch im Haus - ${date}`,
         font: { size: 14, weight: 'bold' },
     };
-    applyZoomToChart(consumptionChart);
     consumptionChart.update('none');
+    applyViewToChart(consumptionChart);
 }
 
 function onPvModulesToggle() {
@@ -792,12 +707,12 @@ function hidePanelFilter() {
 
 function refreshPanelChart() {
     if (!lastChartData || !lastPanelMode) return;
-    const data = padDataTo24h(lastChartData);
     const date = document.getElementById('selectedDate').value || todayStr();
+    const data = padDataTo24h(lastChartData, date);
 
     const mode = document.querySelector('input[name="panelMode"]:checked')?.value || 'power';
     const activeInputs = [...document.querySelectorAll('.pvChk:checked')].map(c => parseInt(c.value));
-    const labels = data.timeLabels || [];
+    const labels = data.dateLabels || [];
 
     const datasets = [];
 
@@ -869,15 +784,12 @@ function refreshPanelChart() {
         };
     }
 
-    onNewChartData(labels.length, date, data._dataStart, data._dataEnd);
-    mainChart.data._fullLabels = labels;
+    onNewChartData(date, data.dataXMin, data.dataXMax);
     mainChart.data.labels = labels;
-    datasets.forEach(ds => { ds._fullData = [...ds.data]; });
     mainChart.data.datasets = datasets;
-    applyZoomToChart(mainChart);
     mainChart.update('none');
+    applyViewToChart(mainChart);
 
-    consumptionChart.data._fullLabels = [];
     consumptionChart.data.labels = [];
     consumptionChart.data.datasets = [];
     consumptionChart.update('none');
