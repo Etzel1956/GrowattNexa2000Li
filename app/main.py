@@ -1,3 +1,5 @@
+import csv
+import io
 import logging
 import os
 from contextlib import asynccontextmanager
@@ -6,7 +8,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, Query, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
 from fastapi.templating import Jinja2Templates
@@ -15,6 +17,8 @@ from .growatt_api import GrowattApi
 from .database import (
     get_daily_summaries,
     get_db_status,
+    get_export_daily,
+    get_export_hourly,
     get_monthly_summaries,
     get_statistics,
     init_db,
@@ -184,6 +188,72 @@ async def api_db_status():
     db_info = await get_db_status()
     sched_info = get_scheduler_status()
     return {**db_info, "scheduler": sched_info}
+
+
+_DAILY_COLUMNS = [
+    ("date",        "Datum"),
+    ("pv_kwh",      "PV_Erzeugung_kWh"),
+    ("ac_kwh",      "AC_Einspeisung_kWh"),
+    ("load_kwh",    "Verbrauch_kWh"),
+    ("pv_peak_w",   "PV_Spitze_W"),
+    ("load_peak_w", "Verbrauch_Spitze_W"),
+    ("soc_min_pct", "SOC_Min_Prozent"),
+    ("soc_avg_pct", "SOC_Mittel_Prozent"),
+    ("soc_max_pct", "SOC_Max_Prozent"),
+]
+
+_HOURLY_COLUMNS = [
+    ("date",        "Datum"),
+    ("hour",        "Stunde"),
+    ("pv_avg_w",    "PV_Mittel_W"),
+    ("ac_avg_w",    "AC_Mittel_W"),
+    ("ac_wh",       "AC_Einspeisung_Wh"),
+    ("load_avg_w",  "Verbrauch_Mittel_W"),
+    ("load_wh",     "Verbrauch_Wh"),
+    ("soc_avg_pct", "SOC_Mittel_Prozent"),
+    ("soc_min_pct", "SOC_Min_Prozent"),
+    ("soc_max_pct", "SOC_Max_Prozent"),
+    ("samples",     "Messwerte"),
+]
+
+
+def _rows_to_csv(rows: list[dict], columns: list[tuple[str, str]]) -> str:
+    buf = io.StringIO()
+    # UTF-8 BOM so Excel opens umlauts correctly
+    buf.write("﻿")
+    writer = csv.writer(buf, delimiter=";", lineterminator="\r\n")
+    writer.writerow([header for _, header in columns])
+    for row in rows:
+        writer.writerow(["" if row.get(key) is None else row[key] for key, _ in columns])
+    return buf.getvalue()
+
+
+@app.get("/api/history/export.csv")
+async def api_export_csv(
+    granularity: str = Query("daily", pattern="^(daily|hourly)$"),
+    start: str = Query(default=None),
+    end: str = Query(default=None),
+):
+    """CSV export of historical data — daily summary or hourly aggregation."""
+    if not start:
+        start = "1970-01-01"
+    if not end:
+        end = date.today().isoformat()
+
+    if granularity == "hourly":
+        rows = await get_export_hourly(start, end)
+        csv_text = _rows_to_csv(rows, _HOURLY_COLUMNS)
+        filename = f"growatt_stundenwerte_{start}_{end}.csv"
+    else:
+        rows = await get_export_daily(start, end)
+        csv_text = _rows_to_csv(rows, _DAILY_COLUMNS)
+        filename = f"growatt_tageswerte_{start}_{end}.csv"
+
+    return StreamingResponse(
+        iter([csv_text]),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @app.post("/api/history/rebackfill")

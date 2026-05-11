@@ -175,6 +175,23 @@
     <div class="chart-card history-chart-container">
         <canvas id="historyChart"></canvas>
     </div>
+
+    <div class="export-card">
+        <h3>CSV-Export</h3>
+        <div class="export-row">
+            <label for="exportStart">Von:</label>
+            <input type="date" id="exportStart">
+            <label for="exportEnd">Bis:</label>
+            <input type="date" id="exportEnd">
+            <button class="btn btn-action" onclick="downloadExport('daily')">Tageswerte (CSV)</button>
+            <button class="btn btn-action" onclick="downloadExport('hourly')">Stundenwerte (CSV)</button>
+        </div>
+        <p class="export-hint">
+            Tageswerte: PV-Erzeugung, AC-Einspeisung, Verbrauch, Spitzen, SOC.
+            Stundenwerte: Mittelwerte und Wh aus den 5-Minuten-Messungen.
+            Leere Datumsfelder = gesamter erfasster Zeitraum.
+        </p>
+    </div>
 </section>
 
 <!-- ============================================================ -->

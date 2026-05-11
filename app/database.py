@@ -193,3 +193,75 @@ async def get_last_recorded_date() -> Optional[str]:
         cur = await db.execute("SELECT MAX(date) AS d FROM daily_summary")
         row = await cur.fetchone()
         return row[0] if row and row[0] else None
+
+
+# ------------------------------------------------------------------
+# Export helpers (CSV)
+# ------------------------------------------------------------------
+
+# Sampling interval of the interval_data table in minutes. The Growatt
+# day chart returns one point every 5 minutes (12/h, 288/day). Used to
+# convert average watts → Wh per bucket.
+_SAMPLE_MINUTES = 5
+
+
+async def get_export_daily(start: str, end: str) -> list[dict]:
+    """Return one row per day for export.
+
+    Combines daily_summary (PV production, peaks, SOC) with consumption
+    aggregated from interval_data (Wh = avg(load) * 5min per sample).
+    """
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cur = await db.execute(
+            f"""
+            SELECT
+                ds.date                                 AS date,
+                ds.e_today                              AS pv_kwh,
+                ds.peak_power                           AS pv_peak_w,
+                ds.peak_load                            AS load_peak_w,
+                ds.min_soc                              AS soc_min_pct,
+                ds.max_soc                              AS soc_max_pct,
+                (SELECT ROUND(AVG(soc), 1)
+                   FROM interval_data WHERE date = ds.date) AS soc_avg_pct,
+                (SELECT ROUND(SUM(load_power) * {_SAMPLE_MINUTES} / 60000.0, 3)
+                   FROM interval_data WHERE date = ds.date) AS load_kwh,
+                (SELECT ROUND(SUM(pac)        * {_SAMPLE_MINUTES} / 60000.0, 3)
+                   FROM interval_data WHERE date = ds.date) AS ac_kwh
+            FROM daily_summary ds
+            WHERE ds.date >= ? AND ds.date <= ?
+            ORDER BY ds.date
+            """,
+            (start, end),
+        )
+        rows = await cur.fetchall()
+        return [dict(r) for r in rows]
+
+
+async def get_export_hourly(start: str, end: str) -> list[dict]:
+    """Return one row per hour aggregated from 5-min interval_data."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cur = await db.execute(
+            f"""
+            SELECT
+                date                                                   AS date,
+                substr(time, 1, 2)                                     AS hour,
+                ROUND(AVG(ppv), 1)                                     AS pv_avg_w,
+                ROUND(AVG(pac), 1)                                     AS ac_avg_w,
+                ROUND(AVG(load_power), 1)                              AS load_avg_w,
+                ROUND(AVG(soc), 1)                                     AS soc_avg_pct,
+                MIN(soc)                                               AS soc_min_pct,
+                MAX(soc)                                               AS soc_max_pct,
+                ROUND(SUM(pac)        * {_SAMPLE_MINUTES} / 60.0, 1)   AS ac_wh,
+                ROUND(SUM(load_power) * {_SAMPLE_MINUTES} / 60.0, 1)   AS load_wh,
+                COUNT(*)                                               AS samples
+            FROM interval_data
+            WHERE date >= ? AND date <= ?
+            GROUP BY date, substr(time, 1, 2)
+            ORDER BY date, hour
+            """,
+            (start, end),
+        )
+        rows = await cur.fetchall()
+        return [dict(r) for r in rows]

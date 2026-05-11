@@ -410,6 +410,52 @@ body {
     position: relative;
 }
 
+/* CSV-Export */
+.export-card {
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px 20px;
+    margin-top: 20px;
+}
+
+.export-card h3 {
+    margin: 0 0 12px 0;
+    font-size: 1rem;
+}
+
+.export-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
+}
+
+.export-row label {
+    font-size: 0.9rem;
+    font-weight: 500;
+    color: #555;
+}
+
+.export-row input[type="date"] {
+    padding: 6px 10px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    font-size: 0.9rem;
+    background: #fff;
+}
+
+.export-row .btn {
+    margin-left: 4px;
+}
+
+.export-hint {
+    margin: 10px 0 0 0;
+    font-size: 0.82rem;
+    color: var(--muted);
+    line-height: 1.4;
+}
+
 /* ── Statistics Tab ──────────────────────────────────────────── */
 
 .stats-grid {

@@ -120,9 +120,23 @@ function switchTab(name) {
 
     if (name === 'history') {
         fetchMonthlyHistory();
+        initExportDateRange();
     } else if (name === 'statistics') {
         fetchStatistics();
     }
+}
+
+async function initExportDateRange() {
+    const startEl = document.getElementById('exportStart');
+    const endEl   = document.getElementById('exportEnd');
+    if (!startEl || !endEl) return;
+    if (startEl.value && endEl.value) return;
+    try {
+        const resp = await fetch('/api/db-status');
+        const info = await resp.json();
+        if (!startEl.value && info.oldest_date) startEl.value = info.oldest_date;
+        if (!endEl.value)                       endEl.value   = info.newest_date || todayStr();
+    } catch (e) { /* ignore */ }
 }
 
 // ------------------------------------------------------------------
@@ -1059,6 +1073,19 @@ async function fetchStatistics() {
     } catch (err) {
         console.error('fetchStatistics failed:', err);
     }
+}
+
+// ==================================================================
+// CSV Export
+// ==================================================================
+
+function downloadExport(granularity) {
+    const start = document.getElementById('exportStart').value;
+    const end   = document.getElementById('exportEnd').value;
+    const params = new URLSearchParams({ granularity });
+    if (start) params.set('start', start);
+    if (end)   params.set('end',   end);
+    window.location.href = `/api/history/export.csv?${params.toString()}`;
 }
 
 // ==================================================================
