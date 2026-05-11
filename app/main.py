@@ -217,6 +217,16 @@ _HOURLY_COLUMNS = [
 ]
 
 
+def _format_cell(value) -> str:
+    """German-locale formatting: comma decimal separator so Excel doesn't
+    mistake e.g. "4.7" for a date. Ints stay as-is."""
+    if value is None:
+        return ""
+    if isinstance(value, float):
+        return format(value, "f").rstrip("0").rstrip(".").replace(".", ",") or "0"
+    return str(value)
+
+
 def _rows_to_csv(rows: list[dict], columns: list[tuple[str, str]]) -> str:
     buf = io.StringIO()
     # UTF-8 BOM so Excel opens umlauts correctly
@@ -224,7 +234,7 @@ def _rows_to_csv(rows: list[dict], columns: list[tuple[str, str]]) -> str:
     writer = csv.writer(buf, delimiter=";", lineterminator="\r\n")
     writer.writerow([header for _, header in columns])
     for row in rows:
-        writer.writerow(["" if row.get(key) is None else row[key] for key, _ in columns])
+        writer.writerow([_format_cell(row.get(key)) for key, _ in columns])
     return buf.getvalue()
 
 
